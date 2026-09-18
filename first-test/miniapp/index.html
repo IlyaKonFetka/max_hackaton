@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Смена без штрафа — тест Bridge</title>
+<script src="https://st.max.ru/js/max-web-app.js"></script>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; padding: 16px; font: 15px/1.4 system-ui, -apple-system, sans-serif; background: #f5f6f8; color: #111; }
+  @media (prefers-color-scheme: dark) { body { background: #141618; color: #eee; } .card { background: #1f2327 !important; } pre { background: #0d0f11 !important; } }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  .card { background: #fff; border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; opacity: .6; margin: 0 0 8px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; }
+  button { flex: 1 1 140px; padding: 12px; border: 0; border-radius: 10px; background: #2f6bff; color: #fff; font-size: 15px; }
+  button.secondary { background: #6b7280; }
+  pre { margin: 0; padding: 10px; background: #eef0f3; border-radius: 8px; font-size: 12px; white-space: pre-wrap; word-break: break-all; max-height: 40vh; overflow: auto; }
+  .ok { color: #15803d; } .err { color: #b91c1c; }
+  img { max-width: 100%; border-radius: 8px; margin-top: 8px; }
+  input[type=file] { display: none; }
+</style>
+</head>
+<body>
+<h1>Смена без штрафа — тест мини-приложения</h1>
+
+<div class="card">
+  <h2>Контекст запуска</h2>
+  <pre id="ctx">загрузка…</pre>
+</div>
+
+<div class="card">
+  <h2>Проверки Bridge</h2>
+  <div class="row">
+    <button id="qr">Сканировать QR</button>
+    <button id="contact">Запросить контакт</button>
+    <button id="haptic">Вибрация</button>
+    <button id="launch">getLaunchContext</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Камера (обычный веб, без Bridge)</h2>
+  <div class="row">
+    <button id="photo" class="secondary">Сделать фото</button>
+    <label><input type="file" id="file" accept="image/*" capture="environment"></label>
+  </div>
+  <img id="preview" hidden alt="">
+</div>
+
+<div class="card">
+  <h2>Лог</h2>
+  <pre id="log"></pre>
+</div>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const logEl = $("log");
+  function log(msg, cls) {
+    const t = new Date().toLocaleTimeString();
+    const line = document.createElement("div");
+    if (cls) line.className = cls;
+    line.textContent = `[${t}] ${msg}`;
+    logEl.prepend(line);
+  }
+
+  const wa = window.WebApp;
+  if (!wa) {
+    $("ctx").textContent = "window.WebApp отсутствует — страница открыта вне MAX или скрипт Bridge не загрузился.";
+    log("Bridge не найден", "err");
+  } else {
+    let ctx;
+    try {
+      ctx = {
+        platform: wa.platform,
+        version: wa.version,
+        deviceName: wa.deviceName,
+        viewport: typeof wa.getViewportSize === "function" ? wa.getViewportSize() : undefined,
+        initDataUnsafe: wa.initDataUnsafe,
+        initData_length: wa.initData ? String(wa.initData).length : 0,
+        methods: Object.keys(wa).filter(k => typeof wa[k] === "function").sort(),
+      };
+    } catch (e) { ctx = { error: String(e) }; }
+    $("ctx").textContent = JSON.stringify(ctx, null, 2);
+    log("Bridge найден: platform=" + wa.platform + " version=" + wa.version, "ok");
+  }
+
+  function call(name, fn) {
+    return async () => {
+      if (!wa) return log(name + ": нет Bridge", "err");
+      try {
+        log(name + ": вызов…");
+        const res = await fn();
+        log(name + " → " + JSON.stringify(res), "ok");
+        if (wa.HapticFeedback) wa.HapticFeedback.notificationOccurred("success");
+      } catch (e) {
+        log(name + " ✗ " + (e && e.message ? e.message : JSON.stringify(e)), "err");
+      }
+    };
+  }
+
+  $("qr").onclick = call("openCodeReader", () => wa.openCodeReader(true));
+  $("contact").onclick = call("requestContact", () => wa.requestContact());
+  $("launch").onclick = call("getLaunchContext", () => wa.getLaunchContext());
+  $("haptic").onclick = call("HapticFeedback.impactOccurred", () => wa.HapticFeedback.impactOccurred("medium"));
+
+  $("photo").onclick = () => $("file").click();
+  $("file").onchange = (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return log("Фото: файл не выбран", "err");
+    log(`Фото: ${f.name || "camera"} ${Math.round(f.size / 1024)} КБ ${f.type}`, "ok");
+    const url = URL.createObjectURL(f);
+    const img = $("preview");
+    img.src = url; img.hidden = false;
+  };
+})();
+</script>
+</body>
+</html>
