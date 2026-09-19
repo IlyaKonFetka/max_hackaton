@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r backend/requirements-dev.txt
+      - run: python -m pytest -q tests
+        working-directory: backend
+        env:
+          RUN_BOT: "0"
+          DEBUG_AUTH: "1"
+          MAX_BOT_TOKEN: test-token
+
+  docker-build:
+    # Проверяем требование кейса: образ собирается из исходников, и укладывается ли сборка в 5 минут.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image (timed)
+        run: |
+          start=$(date +%s)
+          docker build -t applicability-engine:ci .
+          echo "build took $(( $(date +%s) - start )) s"
+      - name: Smoke run
+        run: |
+          docker run -d --name app -p 8000:8000 -e RUN_BOT=0 -e MAX_BOT_TOKEN=test applicability-engine:ci
+          for i in $(seq 1 20); do curl -fs http://localhost:8000/health && break || sleep 2; done
+          curl -fs http://localhost:8000/health
+          curl -fs -o /dev/null -w "%{http_code}\n" http://localhost:8000/app/
+          docker logs app | tail -20

@@ -1,0 +1,17 @@
+services:
+  app:
+    build: .
+    image: applicability-engine:local
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+      RULES_DIR: /srv/rules
+      STATIC_DIR: /srv/backend/static
+    ports:
+      - "${PORT:-8000}:8000"
+    volumes:
+      - app-data:/data
+    restart: unless-stopped
+
+volumes:
+  app-data:

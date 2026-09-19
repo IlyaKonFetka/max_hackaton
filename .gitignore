@@ -1,0 +1,9 @@
+THEORY/
+.env
+data/
+__pycache__/
+*.pyc
+.pytest_cache/
+backend/static/
+miniapp/node_modules/
+miniapp/dist/

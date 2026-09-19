@@ -1,0 +1,80 @@
+# Профиль объекта: поля, варианты ответов и вопросы онбординга.
+# Единый источник для бота (вопросы кнопками), движка (предикаты) и мини-приложения (объяснения).
+#
+# Каждое поле должно влиять хотя бы на одно требование в справочнике — иначе это лишний вопрос.
+# value — то, что попадает в профиль и с чем сравниваются предикаты.
+# Для диапазонов value — число (репрезентативное значение диапазона), чтобы предикаты gt/lt работали.
+
+version: "2026-09-20"
+
+fields:
+  - key: activity
+    label: "Вид заведения"
+    question: "Какое у вас заведение?"
+    type: choice
+    options:
+      - { value: cafe,       label: "Кафе / ресторан" }
+      - { value: coffee,     label: "Кофейня" }
+      - { value: canteen,    label: "Столовая" }
+      - { value: bakery,     label: "Пекарня с залом" }
+      - { value: streetfood, label: "Стрит-фуд / киоск" }
+      - { value: bar,        label: "Бар" }
+
+  - key: has_kitchen
+    label: "Кухня"
+    question: "Есть ли собственная кухня — готовите ли блюда на месте?"
+    type: bool
+    options:
+      - { value: true,  label: "Да, готовим" }
+      - { value: false, label: "Нет, только разогрев или напитки" }
+    value_labels: { "true": "есть кухня", "false": "нет кухни" }
+
+  - key: own_production
+    label: "Собственное производство"
+    question: "Есть ли собственное производство — полуфабрикаты, выпечка, заготовки впрок?"
+    type: bool
+    options:
+      - { value: true,  label: "Да" }
+      - { value: false, label: "Нет" }
+    value_labels: { "true": "есть производство", "false": "нет производства" }
+
+  - key: seats
+    label: "Посадочные места"
+    question: "Сколько посадочных мест?"
+    type: choice
+    options:
+      - { value: 0,  label: "Нет, только навынос" }
+      - { value: 10, label: "1–20" }
+      - { value: 35, label: "21–50" }
+      - { value: 80, label: "больше 50" }
+
+  - key: staff
+    label: "Работники"
+    question: "Сколько наёмных работников?"
+    type: choice
+    options:
+      - { value: 0,  label: "Нет, работаю сам" }
+      - { value: 3,  label: "1–5" }
+      - { value: 10, label: "6–15" }
+      - { value: 30, label: "больше 15" }
+
+  - key: alcohol
+    label: "Алкоголь"
+    question: "Продаёте алкоголь?"
+    type: bool
+    options:
+      - { value: true,  label: "Да" }
+      - { value: false, label: "Нет" }
+    value_labels: { "true": "есть алкоголь", "false": "нет алкоголя" }
+
+  - key: region
+    label: "Регион"
+    question: "В каком регионе заведение? Напишите текстом или пропустите."
+    type: text
+    optional: true
+    skip_label: "Пропустить"
+
+  - key: name
+    label: "Название"
+    question: "Как называется заведение? Это попадёт в акт самопроверки."
+    type: text

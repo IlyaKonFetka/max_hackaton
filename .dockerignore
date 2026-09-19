@@ -1,0 +1,14 @@
+.git
+.github
+THEORY
+data
+.env
+**/__pycache__
+**/*.pyc
+.pytest_cache
+miniapp/node_modules
+miniapp/dist
+backend/static
+backend/tests
+*.md
+!README.md
