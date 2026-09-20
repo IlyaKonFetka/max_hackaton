@@ -126,20 +126,61 @@ async def test_onboarding_to_result(fake):
     await h.on_message(msg("/start"))
     assert "Пекарня на Баумана" in fake.last()["text"] and "Самопроверка в процессе" in fake.last()["text"]
 
-    # Чек-лист смены: одно сообщение с кнопками, отметка редактирует клавиатуру
+    # Чек-лист смены — пошагово: заголовок, затем первый пункт полным текстом с короткими кнопками
     await h.on_message(msg("/shift"))
-    sh = fake.last()
-    assert "Чек-лист смены" in sh["text"]
-    sh_btns = [b for b in fake.buttons(sh) if getattr(b, "payload", "").startswith("sh|")]
-    assert len(sh_btns) >= 5
-    cb = await press(sh_btns[0].payload)
-    assert cb.answers == ["Отмечено"]
-    # Клавиатура заменена ответом на callback: первый пункт отмечен галочкой
-    new_btns = [b for row in cb.new_attachments[0].payload.buttons for b in row]
-    assert new_btns[0].text.startswith("✅")
-    # Завершение смены заменяет сообщение и убирает кнопки
-    cb2 = await press(f"shdone|{sh_btns[0].payload.split('|')[1]}")
-    assert cb2.new_attachments == [] and "Смена закрыта" in cb2.new_text
+    header, q1 = fake.sent[-2], fake.sent[-1]
+    assert "Чек-лист смены" in header["text"] and "пунктов" in header["text"]
+    assert q1["text"].startswith("1/")
+    q_btns = [b for b in fake.buttons(q1) if getattr(b, "payload", "").startswith("shq|")]
+    payloads = {b.payload.split("|")[3] for b in q_btns}
+    assert payloads == {"ok", "no", "skip"}
+    ok_payload = next(b.payload for b in q_btns if b.payload.endswith("|ok"))
+    check_id, rule1 = ok_payload.split("|")[1], ok_payload.split("|")[2]
+
+    # Ответ заменяет вопрос на «пункт — ответ» без кнопок и присылает следующий
+    cb = await press(ok_payload)
+    assert cb.new_attachments == [] and "выполнено" in cb.new_text
+    q2 = fake.last()
+    assert q2["text"].startswith("2/")
+    rule2 = next(b.payload for b in fake.buttons(q2) if getattr(b, "payload", "").startswith("shq|")).split("|")[2]
+    assert rule2 != rule1
+
+    # Двойное нажатие по уже отвеченному пункту — «Уже отмечено», следующий вопрос не дублируется
+    sent_before = len(fake.sent)
+    cb_dup = await press(ok_payload)
+    assert cb_dup.answers == ["Уже отмечено"] and len(fake.sent) == sent_before
+
+    # «Нет» и «Пропустить» — пропущенный уходит в конец
+    await press(f"shq|{check_id}|{rule2}|no")
+    q3 = fake.last()
+    rule3 = next(b.payload for b in fake.buttons(q3) if getattr(b, "payload", "").startswith("shq|")).split("|")[2]
+    await press(f"shq|{check_id}|{rule3}|skip")
+    assert fake.last()["text"].startswith("3/")  # счётчик не сдвинулся: пропуск — не ответ
+
+    # Пропущенный возвращается в конце; второй пропуск — не зацикливается, а завершает смену
+    rest = []
+    for _ in range(20):
+        btn = next((b for b in fake.buttons(fake.last()) if getattr(b, "payload", "").startswith("shq|")), None)
+        if btn is None:
+            break
+        rid = btn.payload.split("|")[2]
+        rest.append(rid)
+        await press(f"shq|{check_id}|{rid}|skip")
+    assert rest.count(rule3) == 1 and all(rest.count(r) <= 2 for r in rest)  # rule3 уже пропускали до цикла
+    assert "Не отмечено" in fake.last()["text"] and "Пройти заново" in [b.text for b in fake.buttons(fake.last())]
+
+    # Заново — начинаем с 1/N
+    await press(f"shrestart|{check_id}")
+    assert fake.last()["text"].startswith("1/")
+    await press(f"shq|{check_id}|{rule1}|ok")
+
+    # «Прервать» заменяет сообщение итогом
+    cb_stop = await press(f"shstop|{check_id}")
+    assert "выполнено 1 из" in cb_stop.new_text and "Не отмечено" in cb_stop.new_text
+
+    # Повторный /shift продолжает с места остановки
+    await h.on_message(msg("/shift"))
+    assert "Продолжаем" in fake.sent[-2]["text"]
 
     # Задач пока нет
     await h.on_message(msg("/tasks"))
@@ -147,54 +188,74 @@ async def test_onboarding_to_result(fake):
 
 
 @pytest.mark.asyncio
-async def test_shift_concurrent_taps_do_not_clobber(fake):
-    """Регрессия: два тапа по РАЗНЫМ пунктам чек-листа почти одновременно — раньше при хранении
-    отметок одним JSON-блобом второй commit писал весь снимок из своего (уже устаревшего) чтения
-    и затирал отметку первого пункта. Теперь каждый пункт — своя строка (ShiftItem).
-
-    Отдельный пользователь/чат — чтобы не подхватить чек-лист смены, уже частично отмеченный
-    другим тестом этого модуля (тот же venue/дата дали бы не пустой начальный чек-лист).
-    """
-    import asyncio
-
+async def test_shift_photo_answers_current_item(fake, monkeypatch):
+    """Фото, присланное во время вопроса, засчитывается как «выполнено» именно для этого пункта."""
     uid, chat = 777099, 555099
     with db_session() as db:
         svc.get_or_create_user(db, uid, "Тест2", chat_id=chat)
         svc.save_venue(db, uid, {"activity": "cafe", "has_kitchen": True, "own_production": True,
                                  "seats": 35, "staff": 10, "alcohol": False, "name": "Кафе 2"})
 
-    def msg2(text):
+    def msg2(text, attachments=None):
         return SimpleNamespace(message=SimpleNamespace(
             recipient=SimpleNamespace(chat_id=chat, user_id=None),
             sender=SimpleNamespace(user_id=uid, first_name="Тест2", last_name="", username=None),
+            body=SimpleNamespace(text=text, attachments=attachments or [], mid="mX"),
+        ))
+
+    async def fake_download(url):
+        return "photos/fake.jpg"
+    monkeypatch.setattr(h, "download_from_max", fake_download)
+
+    await h.on_message(msg2("/shift"))
+    q1 = fake.last()
+    ok_payload = next(b.payload for b in fake.buttons(q1) if getattr(b, "payload", "").startswith("shq|"))
+    check_id, rule1 = int(ok_payload.split("|")[1]), ok_payload.split("|")[2]
+
+    photo = SimpleNamespace(type="image", payload=SimpleNamespace(url="https://example/x.jpg"))
+    await h.on_message(msg2("", [photo]))
+    assert any("Фото принято" in m["text"] for m in fake.sent[-2:])
+    assert fake.last()["text"].startswith("2/")
+    with db_session() as db:
+        it = db.execute(select(ShiftItem).where(ShiftItem.shift_check_id == check_id, ShiftItem.rule_id == rule1)).scalars().first()
+        assert it.status == "ok" and it.photo_path == "photos/fake.jpg"
+
+
+@pytest.mark.asyncio
+async def test_profile_change_resets_today_shift(fake):
+    """Сменили профиль — сегодняшний чек-лист смены собирается заново под новый набор требований."""
+    uid, chat = 777098, 555098
+    with db_session() as db:
+        svc.get_or_create_user(db, uid, "Тест3", chat_id=chat)
+        svc.save_venue(db, uid, {"activity": "cafe", "has_kitchen": True, "own_production": True,
+                                 "seats": 35, "staff": 10, "alcohol": False, "name": "Кафе 3"})
+
+    def msg3(text):
+        return SimpleNamespace(message=SimpleNamespace(
+            recipient=SimpleNamespace(chat_id=chat, user_id=None),
+            sender=SimpleNamespace(user_id=uid, first_name="Тест3", last_name="", username=None),
             body=SimpleNamespace(text=text, attachments=[], mid="mX"),
         ))
 
-    def press2(payload):
-        cb = FakeCallback(payload)
-        cb.callback.user = SimpleNamespace(user_id=uid, first_name="Тест2", last_name="", username=None)
-        cb.message.recipient = SimpleNamespace(chat_id=chat)
-        return cb
+    await h.on_message(msg3("/shift"))
+    total_cafe = int(fake.last()["text"].split("/")[1].split()[0])
+    ok_payload = next(b.payload for b in fake.buttons(fake.last()) if getattr(b, "payload", "").startswith("shq|"))
+    cb = FakeCallback(ok_payload)
+    cb.callback.user = SimpleNamespace(user_id=uid, first_name="Тест3", last_name="", username=None)
+    cb.message.recipient = SimpleNamespace(chat_id=chat)
+    await h.on_callback(cb)
 
-    await h.on_message(msg2("/shift"))
-    sh_btns = [b for b in fake.buttons(fake.last()) if getattr(b, "payload", "").startswith("sh|")]
-    assert len(sh_btns) >= 2
-    p1, p2 = sh_btns[0].payload, sh_btns[1].payload
-    initial = {getattr(b, "payload", "").split("|")[2]: getattr(b, "text", "").startswith("✅") for b in sh_btns[:2]}
-    assert not any(initial.values()), "тест ожидает чистый чек-лист — оба пункта изначально не отмечены"
-
-    # Оба обработчика стартуют без ожидания друг друга — как если бы оба callback пришли почти одновременно.
-    cb1, cb2 = press2(p1), press2(p2)
-    await asyncio.gather(h.on_callback(cb1), h.on_callback(cb2))
-
-    check_id = int(p1.split("|")[1])
+    # Профиль стал «кофе навынос, без кухни и работников» — через сервис + тот же путь, что и кнопка подтверждения
     with db_session() as db:
-        items = {it.rule_id: it.status for it in db.execute(
-            select(ShiftItem).where(ShiftItem.shift_check_id == check_id)
-        ).scalars().all()}
-    rule1, rule2 = p1.split("|")[2], p2.split("|")[2]
-    assert items[rule1] == "ok", "отметка первого пункта потеряна"
-    assert items[rule2] == "ok", "отметка второго пункта потеряна"
+        h._set_state(db, uid, "onb:confirm", {"profile": {"activity": "coffee", "has_kitchen": False, "own_production": False,
+                                                          "seats": 0, "staff": 0, "alcohol": False, "name": "Кофе 3"}})
+    await h._confirm_profile(chat, uid)
+
+    await h.on_message(msg3("/shift"))
+    header = fake.sent[-2]["text"]
+    assert "Чек-лист смены" in header and "Продолжаем" not in header  # начали с нуля
+    total_coffee = int(fake.last()["text"].split("/")[1].split()[0])
+    assert total_coffee < total_cafe
 
 
 @pytest.mark.asyncio
@@ -222,15 +283,47 @@ async def test_tasks_flow(fake):
     contact = SimpleNamespace(type="contact", payload=SimpleNamespace(
         vcf=SimpleNamespace(full_name="Иван Повар", phone="+79990000000"), max_info=None))
     await h.on_message(msg("", [contact]))
-    assert "Иван Повар" in fake.last()["text"] and "?start=task_" in fake.last()["text"]
+    assert "Иван Повар" in fake.last()["text"]
+    share = next(getattr(b, "url", "") for b in fake.buttons(fake.last()) if "max.ru/:share" in getattr(b, "url", ""))
+    from urllib.parse import unquote
+    assert f"?start=task_{task_id}" in unquote(share) and "Кафе" in unquote(share)
 
-    # Сотрудник открывает бота по диплинку
+    # Контакт без привязки к аккаунту MAX → бот даёт кнопку «Отправить сотруднику в MAX» (:share с текстом)
+    last_btns = fake.buttons(fake.last())
+    assert any("max.ru/:share?text=" in getattr(b, "url", "") for b in last_btns)
+
+    # Владелец открыл свою же ссылку — задачу не забирает
     fake.sent.clear()
-    ev = SimpleNamespace(user=SimpleNamespace(user_id=888, first_name="Иван", last_name="Повар", username=None),
-                         chat_id=999, payload=f"task_{task_id}")
-    await h.on_bot_started(ev)
+    await h.on_bot_started(SimpleNamespace(user=user(), chat_id=CHAT, payload=f"task_{task_id}"))
+    assert "ссылка для сотрудника" in fake.last()["text"]
+
+    # Посторонний открыл ссылку: аккаунт не назначен, известен телефон → просим подтвердить контакт
+    fake.sent.clear()
+    stranger = SimpleNamespace(user_id=888, first_name="Иван", last_name="Повар", username=None)
+    await h.on_bot_started(SimpleNamespace(user=stranger, chat_id=999, payload=f"task_{task_id}"))
+    assert "Подтвердите" in fake.last()["text"]
+    # Прислал чужой номер — отказ
+    wrong = SimpleNamespace(type="contact", payload=SimpleNamespace(
+        vcf=SimpleNamespace(full_name="Иван", phone="+79991111111"), max_info=None))
+    await h.on_message(SimpleNamespace(message=SimpleNamespace(
+        recipient=SimpleNamespace(chat_id=999, user_id=None), sender=stranger,
+        body=SimpleNamespace(text="", attachments=[wrong], mid="m"))))
+    assert "не совпадает" in fake.last()["text"]
+    # Снова по ссылке и правильный номер — принято, владелец уведомлён
+    await h.on_bot_started(SimpleNamespace(user=stranger, chat_id=999, payload=f"task_{task_id}"))
+    right = SimpleNamespace(type="contact", payload=SimpleNamespace(
+        vcf=SimpleNamespace(full_name="Иван Повар", phone="8 (999) 000-00-00"), max_info=None))
+    fake.sent.clear()
+    await h.on_message(SimpleNamespace(message=SimpleNamespace(
+        recipient=SimpleNamespace(chat_id=999, user_id=None), sender=stranger,
+        body=SimpleNamespace(text="", attachments=[right], mid="m"))))
     assert any(m["chat_id"] == 999 and "назначена задача" in m["text"] for m in fake.sent)
     assert any(m["chat_id"] == CHAT and "принял" in m["text"] for m in fake.sent)
+    # Теперь задача привязана к аккаунту 888 — третий по ссылке получает отказ
+    fake.sent.clear()
+    other = SimpleNamespace(user_id=777, first_name="Пётр", last_name="", username=None)
+    await h.on_bot_started(SimpleNamespace(user=other, chat_id=998, payload=f"task_{task_id}"))
+    assert "назначена другому" in fake.last()["text"]
 
     # Закрытие без фото
     await press(f"done|{task_id}")

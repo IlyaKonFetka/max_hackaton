@@ -56,7 +56,7 @@ def test_full_flow(client):
     assert r.status_code == 200 and r.json()["status"] == "violation"
     r = client.post(f"/api/session/{sid}/answers/rpn-brakerazh/photo",
                     files={"file": ("j.png", io.BytesIO(_png_bytes()), "image/png")}, headers=H)
-    assert r.status_code == 200 and r.json()["photo_url"].endswith(".png")
+    assert r.status_code == 200 and r.json()["photo_url"].endswith(".jpg")  # нормализуется в JPEG
     for rid in ids:
         if rid != "rpn-brakerazh":
             assert client.put(f"/api/session/{sid}/answers/{rid}", json={"status": "ok"}, headers=H).status_code == 200
@@ -106,3 +106,20 @@ def test_second_profile_is_smaller(client):
     s = client.post("/api/session/new", headers=H).json()
     assert len(s["applicable"]) < 10
     assert any("нет кухни" in r for x in s["not_applicable"] for r in x["reasons"])
+
+
+def test_upload_applies_exif_orientation(client):
+    """Фото с EXIF Orientation=6 (повёрнуто на 90°) после сохранения физически повёрнуто: reportlab EXIF не читает."""
+    import io as _io
+    from PIL import Image
+    from app.services.media import save_upload, abs_path
+
+    img = Image.new("RGB", (40, 20), "red")  # альбомная 40x20
+    exif = Image.Exif()
+    exif[0x0112] = 6  # Orientation: Rotate 90 CW
+    buf = _io.BytesIO()
+    img.save(buf, format="JPEG", exif=exif)
+    rel = save_upload(buf.getvalue(), "image/jpeg", "p.jpg")
+    saved = Image.open(abs_path(rel))
+    assert saved.size == (20, 40), "ориентация должна быть применена к пикселям"
+    assert not saved.getexif().get(0x0112), "EXIF-ориентация должна быть сброшена"

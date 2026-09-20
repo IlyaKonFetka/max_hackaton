@@ -6,3 +6,4 @@ reportlab==5.0.1
 python-multipart==0.0.32
 httpx==0.28.1
 maxapi==1.2.2
+pillow==12.2.0

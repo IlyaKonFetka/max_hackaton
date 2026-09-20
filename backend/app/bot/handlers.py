@@ -149,6 +149,11 @@ async def _confirm_profile(chat_id: int, user_id: int):
         old = svc.open_session(db, venue)
         if old:
             old.finished_at = utcnow()
+        # Сегодняшний чек-лист смены собран под старый профиль — удаляем, /shift соберёт заново.
+        today = _local_now().strftime("%Y-%m-%d")
+        for sc in db.execute(select(ShiftCheck).where(ShiftCheck.venue_id == venue.id, ShiftCheck.date == today)).scalars().all():
+            db.delete(sc)
+        db.flush()
         session = svc.start_session(db, venue)
         _set_state(db, user_id, "idle", {})
         summ = summary(venue.profile, get_rulebook())
@@ -220,6 +225,14 @@ async def _show_task_for_assignee(chat_id: int, task: Task):
 
 
 # ---------- чек-лист смены (живёт в боте) ----------
+#
+# Пошаговый режим: один пункт за раз, полный текст — в теле сообщения, кнопки короткие.
+# Так нет ни обрезанных подписей на кнопках, ни потерянных нажатий: клиент MAX глотает тап,
+# пока предыдущее обновление сообщения в полёте, поэтому тумблеры в одной клавиатуре ненадёжны.
+# Фото, присланное во время вопроса, привязывается именно к этому пункту.
+
+SHIFT_ANSWER_LABEL = {"ok": "✅ выполнено", "no": "❌ не выполнено", "skip": "пропущено"}
+
 
 def _shift_rules(venue: Venue):
     from ..engine import applicable
@@ -227,28 +240,42 @@ def _shift_rules(venue: Venue):
     return [r for r in applicable(venue.profile, get_rulebook()) if r.period == "shift"]
 
 
-def _short(title: str, n: int = 44) -> str:
-    return title if len(title) <= n else title[: n - 1] + "…"
-
-
 def _get_or_create_shift(db, venue: Venue, user_id: int, rules: list) -> ShiftCheck:
-    """Сегодняшний чек-лист смены; создаёт по одной строке ShiftItem на каждое применимое требование.
-
-    Если справочник изменился (появилось новое требование), недостающие строки досоздаются —
-    но уже отмеченные пункты не трогаются.
-    """
+    """Сегодняшний чек-лист смены; по строке ShiftItem на каждое применимое требование."""
     today = _local_now().strftime("%Y-%m-%d")
     sc = db.execute(select(ShiftCheck).where(ShiftCheck.venue_id == venue.id, ShiftCheck.date == today)).scalars().first()
     if sc is None:
         sc = ShiftCheck(venue_id=venue.id, user_id=user_id, date=today)
         db.add(sc)
         db.flush()
-    existing = {it.rule_id for it in db.execute(select(ShiftItem).where(ShiftItem.shift_check_id == sc.id)).scalars().all()}
+    wanted = {r.id for r in rules}
+    existing_items = db.execute(select(ShiftItem).where(ShiftItem.shift_check_id == sc.id)).scalars().all()
+    existing = {it.rule_id for it in existing_items}
+    for it in existing_items:
+        if it.rule_id not in wanted:
+            db.delete(it)
     for r in rules:
         if r.id not in existing:
             db.add(ShiftItem(shift_check_id=sc.id, rule_id=r.id, status=None))
     db.flush()
     return sc
+
+
+def _shift_items(db, check_id: int) -> dict[str, ShiftItem]:
+    return {it.rule_id: it for it in db.execute(select(ShiftItem).where(ShiftItem.shift_check_id == check_id)).scalars().all()}
+
+
+def _next_unanswered(rules: list, items: dict[str, ShiftItem], skipped: list[str], left: list[str] = ()) -> str | None:
+    """Первый неотвеченный пункт; пропущенные — в конец; пропущенные дважды (left) больше не спрашиваем."""
+    def open_(rid: str) -> bool:
+        return rid not in left and (items.get(rid) is None or items[rid].status is None)
+    for r in rules:
+        if r.id not in skipped and open_(r.id):
+            return r.id
+    for rid in skipped:
+        if open_(rid):
+            return rid
+    return None
 
 
 async def show_shift(chat_id: int, user_id: int):
@@ -259,58 +286,154 @@ async def show_shift(chat_id: int, user_id: int):
             return
         rules = _shift_rules(venue)
         sc = _get_or_create_shift(db, venue, user_id, rules)
-        by_rule = {it.rule_id: it for it in db.execute(select(ShiftItem).where(ShiftItem.shift_check_id == sc.id)).scalars().all()}
-        rows = [(r.id, _short(r.title), (by_rule.get(r.id).status if r.id in by_rule else None) == "ok") for r in rules]
-        check_id = sc.id
+        items = _shift_items(db, sc.id)
+        answered = sum(1 for r in rules if items.get(r.id) and items[r.id].status)
+        check_id, total = sc.id, len(rules)
         d = _local_now().strftime("%d.%m")
-    await _send(
-        chat_id,
-        f"Чек-лист смены {d} — {len(rows)} пунктов. Отмечайте по мере проверки; фото журнала можно прислать ответом.",
-        attachments=[kb.shift_kb(check_id, rows)],
-    )
+    if answered >= total:
+        await _shift_summary(chat_id, user_id, check_id)
+        return
+    with db_session() as db:
+        _set_state(db, user_id, f"shift:{check_id}", {"skipped": []})
+    if answered == 0:
+        await _send(chat_id, f"Чек-лист смены {d} — {total} пунктов. По одному: нажмите кнопку или пришлите фото вместо неё.")
+    else:
+        await _send(chat_id, f"Продолжаем чек-лист смены {d}: отмечено {answered} из {total}.")
+    await _ask_shift_item(chat_id, user_id, check_id)
 
 
-async def _toggle_shift(cb: MessageCallback, check_id: int, rule_id: str):
-    """Отмечает ровно один пункт: чужой пункт, отмеченный почти одновременно, не может быть затёрт —
-    это разные строки ShiftItem, а не общий JSON-снимок."""
+async def _ask_shift_item(chat_id: int, user_id: int, check_id: int):
     with db_session() as db:
         sc = db.get(ShiftCheck, check_id)
         if sc is None:
-            await cb.ack(notification="Чек-лист не найден")
+            _set_state(db, user_id, "idle", {})
             return
+        venue = db.get(Venue, sc.venue_id)
+        rules = _shift_rules(venue)
+        items = _shift_items(db, check_id)
+        st = _state(db, user_id)
+        skipped = list((st.data or {}).get("skipped") or [])
+        left = list((st.data or {}).get("left") or [])
+        rid = _next_unanswered(rules, items, skipped, left)
+        if rid is None:
+            _set_state(db, user_id, "idle", {})
+        else:
+            _set_state(db, user_id, f"shift:{check_id}", {"skipped": skipped, "left": left, "current": rid})
+        by_id = {r.id: r for r in rules}
+        n = sum(1 for r in rules if items.get(r.id) and items[r.id].status) + 1
+        total = len(rules)
+    if rid is None:
+        await _shift_summary(chat_id, user_id, check_id)
+        return
+    r = by_id[rid]
+    text = f"{n}/{total} · {r.agency_label}\n\n{r.title}"
+    if r.check:
+        text += f"\n\nЧто проверить: {r.check}"
+    await _send(chat_id, text, attachments=[kb.shift_item_kb(check_id, rid)])
+
+
+async def _answer_shift_item(cb: MessageCallback, check_id: int, rule_id: str, answer: str):
+    user_id = cb.callback.user.user_id
+    chat_id = cb.message.recipient.chat_id
+    rules_by_id = svc.rules_by_id()
+    title = rules_by_id[rule_id].title if rule_id in rules_by_id else rule_id
+    with db_session() as db:
         item = db.execute(
             select(ShiftItem).where(ShiftItem.shift_check_id == check_id, ShiftItem.rule_id == rule_id)
         ).scalars().first()
         if item is None:
-            item = ShiftItem(shift_check_id=check_id, rule_id=rule_id, status=None)
-            db.add(item)
-            db.flush()
-        item.status = None if item.status == "ok" else "ok"
+            await cb.ack(notification="Пункт не найден")
+            return
+        if item.status is not None:
+            # Повторный тап по уже отвеченному вопросу (двойное нажатие) — ничего не меняем и не спрашиваем дальше.
+            await cb.ack(notification="Уже отмечено")
+            return
+        st = _state(db, user_id)
+        data = dict(st.data or {})
+        skipped = list(data.get("skipped") or [])
+        left = list(data.get("left") or [])
+        if answer == "skip":
+            if rule_id in skipped:
+                left.append(rule_id)  # второй пропуск — оставляем неотмеченным и идём дальше
+            else:
+                skipped.append(rule_id)
+        else:
+            item.status = answer
         db.flush()
-        venue = db.get(Venue, sc.venue_id)
-        rules = _shift_rules(venue)
-        by_rule = {it.rule_id: it.status for it in db.execute(select(ShiftItem).where(ShiftItem.shift_check_id == check_id)).scalars().all()}
-        rows = [(r.id, _short(r.title), by_rule.get(r.id) == "ok") for r in rules]
-    await _replace(cb, cb.message.body.text, [kb.shift_kb(check_id, rows)], notification="Отмечено")
+        _set_state(db, user_id, f"shift:{check_id}", {"skipped": skipped, "left": left})
+    await _replace(cb, f"{title}\n— {SHIFT_ANSWER_LABEL[answer]}", [], notification=SHIFT_ANSWER_LABEL[answer])
+    await _ask_shift_item(chat_id, user_id, check_id)
 
 
-async def _finish_shift(cb: MessageCallback, check_id: int):
+async def _shift_photo_answer(chat_id: int, user_id: int, check_id: int, url: str):
+    """Фото во время вопроса = «выполнено» с доказательством, привязанным к этому пункту."""
+    with db_session() as db:
+        st = _state(db, user_id)
+        rid = (st.data or {}).get("current")
+    if not rid:
+        await _attach_shift_photo(chat_id, user_id, url)
+        return
+    try:
+        rel = await download_from_max(url)
+    except Exception as e:  # noqa: BLE001
+        log.warning("фото не скачалось: %s", e)
+        await _send(chat_id, "Не удалось сохранить фото, попробуйте ещё раз или нажмите кнопку.")
+        return
+    with db_session() as db:
+        item = db.execute(
+            select(ShiftItem).where(ShiftItem.shift_check_id == check_id, ShiftItem.rule_id == rid)
+        ).scalars().first()
+        if item is not None and item.status is None:
+            item.status = "ok"
+            item.photo_path = rel
+            db.flush()
+    rule = svc.rules_by_id().get(rid)
+    await _send(chat_id, f"Фото принято: «{rule.title if rule else rid}» — ✅ выполнено.")
+    await _ask_shift_item(chat_id, user_id, check_id)
+
+
+async def _shift_summary(chat_id: int, user_id: int, check_id: int, cb: MessageCallback | None = None):
     with db_session() as db:
         sc = db.get(ShiftCheck, check_id)
         if sc is None:
-            await cb.ack(notification="Чек-лист не найден")
+            await _send(chat_id, "Чек-лист не найден.")
             return
-        items = db.execute(select(ShiftItem).where(ShiftItem.shift_check_id == check_id)).scalars().all()
-        total = len(items)
-        done = sum(1 for it in items if it.status == "ok")
-        missing = [it.rule_id for it in items if it.status != "ok"]
-        rules = svc.rules_by_id()
-    if missing:
-        names = "\n".join(f"• {rules[r].title}" for r in missing if r in rules)
-        text = f"Смена закрыта: {done} из {total}. Не отмечено:\n{names}\n\nЭти пункты попадут в следующую самопроверку как требующие внимания."
-        await _replace(cb, text, [], notification=f"Отмечено {done} из {total}")
+        venue = db.get(Venue, sc.venue_id)
+        rules = _shift_rules(venue)
+        items = _shift_items(db, check_id)
+        _set_state(db, user_id, "idle", {})
+        ok = [r.title for r in rules if items.get(r.id) and items[r.id].status == "ok"]
+        no = [r.title for r in rules if items.get(r.id) and items[r.id].status == "no"]
+        left = [r.title for r in rules if not items.get(r.id) or items[r.id].status is None]
+        total = len(rules)
+        date = sc.date
+    lines = [f"Смена {date[8:10]}.{date[5:7]}: выполнено {len(ok)} из {total}."]
+    if no:
+        lines.append("\nНе выполнено:\n" + "\n".join(f"• {t}" for t in no))
+    if left:
+        lines.append("\nНе отмечено:\n" + "\n".join(f"• {t}" for t in left))
+    if no or left:
+        lines.append("\nЭти пункты стоит закрыть до конца смены — они попадут в следующую самопроверку как требующие внимания.")
     else:
-        await _replace(cb, f"Смена закрыта: все {total} пунктов отмечены. Хорошего дня.", [], notification="Смена закрыта")
+        lines.append("Все пункты закрыты. Хорошего дня.")
+    text = "\n".join(lines)
+    if cb is not None:
+        await _replace(cb, text, [kb.shift_summary_kb(check_id)], notification="Смена закрыта")
+    else:
+        await _send(chat_id, text, attachments=[kb.shift_summary_kb(check_id)])
+
+
+async def _restart_shift(cb: MessageCallback, check_id: int):
+    user_id = cb.callback.user.user_id
+    chat_id = cb.message.recipient.chat_id
+    with db_session() as db:
+        for it in _shift_items(db, check_id).values():
+            it.status = None
+            it.photo_path = None
+        db.flush()
+        _set_state(db, user_id, f"shift:{check_id}", {"skipped": [], "left": []})
+    await cb.ack(notification="Заново")
+    await _ask_shift_item(chat_id, user_id, check_id)
 
 
 # ---------- события ----------
@@ -346,15 +469,66 @@ async def _claim_task(chat_id: int, user_id: int, raw_id: str):
         if task is None or task.status != "open":
             await _send(chat_id, "Эта задача уже закрыта или не найдена.")
             return
-        task.assignee_user_id = user_id
-        db.flush()
+        if task.owner_id == user_id:
+            await _send(chat_id, "Это ссылка для сотрудника — у вас задача и так есть в /tasks. Перешлите ссылку ему.")
+            return
+        # Назначен конкретный аккаунт MAX — принять может только он.
+        if task.assignee_user_id and task.assignee_user_id != user_id:
+            await _send(chat_id, "Эта задача назначена другому сотруднику.")
+            return
+        # Аккаунт неизвестен, но известен телефон — просим подтвердить номер.
+        if not task.assignee_user_id and task.assignee_phone:
+            _set_state(db, user_id, f"claim:{task_id}", {})
+            await _send(
+                chat_id,
+                f"Задача «{task.title}» назначена на номер ···{_norm_phone(task.assignee_phone)[-4:]}. "
+                "Подтвердите, что это вы — отправьте свой контакт.",
+                attachments=[kb.claim_kb()],
+            )
+            return
+        _do_claim(db, task, user_id)
         owner = db.get(User, task.owner_id)
         u = db.get(User, user_id)
         name = f"{u.first_name} {u.last_name}".strip()
-        if not task.assignee_name:
-            task.assignee_name = name
     await _show_task_for_assignee(chat_id, task)
-    if owner and owner.chat_id and owner.id != user_id:
+    if owner and owner.chat_id:
+        await _send(owner.chat_id, f"{name} принял(а) задачу: {task.title}")
+
+
+def _do_claim(db, task: Task, user_id: int) -> None:
+    task.assignee_user_id = user_id
+    u = db.get(User, user_id)
+    if u and not task.assignee_name:
+        task.assignee_name = f"{u.first_name} {u.last_name}".strip()
+    db.flush()
+
+
+async def _claim_with_contact(chat_id: int, user_id: int, task_id: int, attachment):
+    """Сотрудник прислал свой контакт по просьбе бота — сверяем телефон с назначенным."""
+    payload = getattr(attachment, "payload", None)
+    phone = ""
+    try:
+        phone = payload.vcf.phone or ""
+    except Exception:  # noqa: BLE001
+        pass
+    mi = getattr(payload, "max_info", None)
+    contact_uid = getattr(mi, "user_id", None) if mi is not None else None
+    with db_session() as db:
+        _set_state(db, user_id, "idle", {})
+        task = db.get(Task, task_id)
+        if task is None or task.status != "open":
+            await _send(chat_id, "Задача уже закрыта или не найдена.")
+            return
+        own_contact = contact_uid is None or contact_uid == user_id
+        if not own_contact or _norm_phone(phone) != _norm_phone(task.assignee_phone):
+            await _send(chat_id, "Номер не совпадает с назначенным. Если это ошибка — попросите владельца переназначить задачу.")
+            return
+        _do_claim(db, task, user_id)
+        owner = db.get(User, task.owner_id)
+        u = db.get(User, user_id)
+        name = f"{u.first_name} {u.last_name}".strip()
+    await _show_task_for_assignee(chat_id, task)
+    if owner and owner.chat_id:
         await _send(owner.chat_id, f"{name} принял(а) задачу: {task.title}")
 
 
@@ -398,10 +572,16 @@ async def on_message(event: MessageCreated):
         if atype.endswith("contact") and state.startswith("assign:"):
             await _assign_from_contact(chat_id, user_id, int(state.split(":")[1]), a)
             return
+        if atype.endswith("contact") and state.startswith("claim:"):
+            await _claim_with_contact(chat_id, user_id, int(state.split(":")[1]), a)
+            return
         if atype.endswith("image"):
             url = getattr(getattr(a, "payload", None), "url", None)
             if state.startswith("done:") and url:
                 await _close_task_with_photo(chat_id, user_id, int(state.split(":")[1]), url)
+                return
+            if state.startswith("shift:") and url:
+                await _shift_photo_answer(chat_id, user_id, int(state.split(":")[1]), url)
                 return
             if url:
                 await _attach_shift_photo(chat_id, user_id, url)
@@ -431,6 +611,9 @@ async def on_message(event: MessageCreated):
         return
     if state.startswith("done:"):
         await _send(chat_id, "Пришлите фото результата или закройте без фото.", attachments=[kb.done_kb(int(state.split(':')[1]))])
+        return
+    if state.startswith("shift:"):
+        await _send(chat_id, "Ответьте кнопкой под пунктом или пришлите фото — оно засчитается как «выполнено».")
         return
 
     await _send(chat_id, "Не понял. " + texts.HELP)
@@ -500,10 +683,12 @@ async def on_callback(cb: MessageCallback):
         elif head == "shift":
             await cb.ack(notification="Чек-лист")
             await show_shift(chat_id, user_id)
-        elif head == "sh":
-            await _toggle_shift(cb, int(parts[1]), parts[2])
-        elif head == "shdone":
-            await _finish_shift(cb, int(parts[1]))
+        elif head == "shq":
+            await _answer_shift_item(cb, int(parts[1]), parts[2], parts[3])
+        elif head == "shstop":
+            await _shift_summary(chat_id, user_id, int(parts[1]), cb=cb)
+        elif head == "shrestart":
+            await _restart_shift(cb, int(parts[1]))
         else:
             await cb.ack(notification="Неизвестное действие")
     except Exception as e:  # noqa: BLE001
@@ -571,9 +756,23 @@ async def _resend_act(chat_id: int, user_id: int):
     await send_act(sid)
 
 
+def _norm_phone(p: str | None) -> str:
+    return "".join(ch for ch in (p or "") if ch.isdigit())[-10:]
+
+
+def _invite_text(venue_name: str, title: str, due: str, task_id: int) -> str:
+    link = f"https://max.ru/{settings.bot_username}?start=task_{task_id}"
+    return (
+        f"Вам назначена задача в «{venue_name}»:\n{title}\nСрок: {due}\n\n"
+        f"Откройте, чтобы принять и закрыть с фото: {link}"
+    )
+
+
 async def _assign_from_contact(chat_id: int, user_id: int, task_id: int, attachment):
+    from urllib.parse import quote
+
     payload = getattr(attachment, "payload", None)
-    name, phone, max_uid = "", "", None
+    name, phone, max_uid, username = "", "", None, None
     try:
         vcf = payload.vcf
         name = vcf.full_name or ""
@@ -583,6 +782,7 @@ async def _assign_from_contact(chat_id: int, user_id: int, task_id: int, attachm
     mi = getattr(payload, "max_info", None)
     if mi is not None:
         max_uid = getattr(mi, "user_id", None)
+        username = getattr(mi, "username", None)
         if not name:
             name = f"{getattr(mi, 'first_name', '')} {getattr(mi, 'last_name', '') or ''}".strip()
     with db_session() as db:
@@ -591,27 +791,43 @@ async def _assign_from_contact(chat_id: int, user_id: int, task_id: int, attachm
             _set_state(db, user_id, "idle", {})
             await _send(chat_id, "Задача не найдена.")
             return
+        if max_uid and max_uid == task.owner_id:
+            _set_state(db, user_id, "idle", {})
+            await _send(chat_id, "Это ваш собственный контакт. Отправьте контакт сотрудника, которому поручаете задачу.")
+            return
         task.assignee_name = name or "Сотрудник"
         task.assignee_phone = phone
-        if max_uid:
-            task.assignee_user_id = max_uid
+        task.assignee_user_id = max_uid  # None, если контакт не связан с аккаунтом MAX — тогда сверим по телефону при открытии
         _set_state(db, user_id, "idle", {})
         title, due = task.title, _fmt_date(task.due_date)
+        venue = db.get(Venue, task.venue_id)
+        venue_name = venue.name if venue else "заведение"
         assignee_user = db.get(User, max_uid) if max_uid else None
-    link = f"https://max.ru/{settings.bot_username}?start=task_{task_id}"
+
+    invite = _invite_text(venue_name, title, due, task_id)
     delivered = False
     if assignee_user and assignee_user.chat_id:
+        # Сотрудник уже общался с ботом — задача уходит ему напрямую.
         try:
-            await _send(assignee_user.chat_id, f"Вам назначена задача:\n{title}\nСрок: {due}", )
+            await _send(assignee_user.chat_id, invite, attachments=[kb.task_kb(task_id, True)])
             delivered = True
         except Exception:  # noqa: BLE001
             delivered = False
-    msg = f"Ответственный: {name or 'сотрудник'}{(' · ' + phone) if phone else ''}.\n"
+
+    who = f"{name or 'сотрудник'}{(' · ' + phone) if phone else ''}"
     if delivered:
-        msg += "Задача отправлена ему в MAX."
-    else:
-        msg += f"Перешлите сотруднику ссылку — по ней он получит задачу в MAX:\n{link}"
-    await _send(chat_id, msg)
+        await _send(chat_id, f"Ответственный: {who}. Задача отправлена ему в MAX.")
+        return
+
+    # Иначе — одна кнопка открывает «Отправить в MAX» с уже написанным приглашением; остаётся выбрать сотрудника.
+    share_url = f"https://max.ru/:share?text={quote(invite, safe='')}"
+    profile_url = f"https://max.ru/{username}" if username else None
+    await _send(
+        chat_id,
+        f"Ответственный: {who}.\nНажмите кнопку — откроется отправка в MAX с готовым текстом, выберите сотрудника. "
+        "Открыть задачу по ссылке сможет только он.",
+        attachments=[kb.assign_result_kb(share_url, profile_url)],
+    )
 
 
 async def _close_task_with_photo(chat_id: int, user_id: int, task_id: int, url: str):

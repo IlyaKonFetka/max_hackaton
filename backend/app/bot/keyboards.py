@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from maxapi.types import (
     CallbackButton,
+    LinkButton,
     OpenAppButton,
     RequestContactButton,
     RequestGeoLocationButton,
@@ -105,6 +106,13 @@ def assign_kb():
     return kb.as_markup()
 
 
+def claim_kb():
+    kb = InlineKeyboardBuilder()
+    kb.row(RequestContactButton(text="Это я — отправить мой контакт"))
+    kb.row(CallbackButton(text="Отмена", payload="cancel"))
+    return kb.as_markup()
+
+
 def done_kb(task_id: int):
     kb = InlineKeyboardBuilder()
     kb.row(CallbackButton(text="Закрыть без фото", payload=f"done_nophoto|{task_id}"))
@@ -119,13 +127,32 @@ def geo_kb():
     return kb.as_markup()
 
 
-def shift_kb(check_id: int, items: list[tuple[str, str, bool]]):
-    """items: (rule_id, короткий текст, отмечено?)"""
+def shift_item_kb(check_id: int, rule_id: str):
+    """Один пункт чек-листа смены за раз: короткие кнопки, полный текст пункта — в теле сообщения."""
     kb = InlineKeyboardBuilder()
-    for rid, text, checked in items:
-        mark = "✅ " if checked else "☐ "
-        kb.row(CallbackButton(text=(mark + text)[:60], payload=f"sh|{check_id}|{rid}"))
-    kb.row(CallbackButton(text="Завершить смену", payload=f"shdone|{check_id}"))
+    kb.row(
+        CallbackButton(text="✅ Выполнено", payload=f"shq|{check_id}|{rule_id}|ok"),
+        CallbackButton(text="❌ Нет", payload=f"shq|{check_id}|{rule_id}|no"),
+    )
+    kb.row(
+        CallbackButton(text="Пропустить", payload=f"shq|{check_id}|{rule_id}|skip"),
+        CallbackButton(text="Прервать", payload=f"shstop|{check_id}"),
+    )
+    return kb.as_markup()
+
+
+def shift_summary_kb(check_id: int):
+    kb = InlineKeyboardBuilder()
+    kb.row(CallbackButton(text="Пройти заново", payload=f"shrestart|{check_id}"))
+    return kb.as_markup()
+
+
+def assign_result_kb(share_url: str, profile_url: str | None):
+    """После выбора контакта: одной кнопкой открыть «Отправить в MAX» с готовым текстом приглашения."""
+    kb = InlineKeyboardBuilder()
+    kb.row(LinkButton(text="Отправить сотруднику в MAX", url=share_url))
+    if profile_url:
+        kb.row(LinkButton(text="Профиль сотрудника", url=profile_url))
     return kb.as_markup()
 
 
