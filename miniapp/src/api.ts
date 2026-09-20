@@ -93,7 +93,7 @@ export class ApiError extends Error {
 }
 
 function headers(extra: Record<string, string> = {}): Record<string, string> {
-  const h: Record<string, string> = { ...extra }
+  const h: Record<string, string> = { ...extra, 'ngrok-skip-browser-warning': '1' }
   const d = initData()
   if (d) h['X-Max-Init-Data'] = d
   // Локальная отладка без MAX: ?debug_user=<id> и DEBUG_AUTH=1 на бэкенде.
