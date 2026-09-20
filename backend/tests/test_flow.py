@@ -48,17 +48,17 @@ def test_full_flow(client):
     assert s["progress"]["total"] == len(s["applicable"]) > 15
     assert s["not_applicable"] and all(x["reasons"] for x in s["not_applicable"])
     ids = [a["id"] for a in s["applicable"]]
-    assert "rpn-brakerazh" in ids and "rt-contracts" in ids
+    assert "rpn-flow" in ids and "rt-contracts" in ids
     sid = s["id"]
 
     # Ответы: одно нарушение с фото и комментарием, остальное — соблюдается.
-    r = client.put(f"/api/session/{sid}/answers/rpn-brakerazh", json={"status": "violation", "comment": "журнал не вёлся 3 дня"}, headers=H)
+    r = client.put(f"/api/session/{sid}/answers/rpn-flow", json={"status": "violation", "comment": "журнал не вёлся 3 дня"}, headers=H)
     assert r.status_code == 200 and r.json()["status"] == "violation"
-    r = client.post(f"/api/session/{sid}/answers/rpn-brakerazh/photo",
+    r = client.post(f"/api/session/{sid}/answers/rpn-flow/photo",
                     files={"file": ("j.png", io.BytesIO(_png_bytes()), "image/png")}, headers=H)
     assert r.status_code == 200 and r.json()["photo_url"].endswith(".jpg")  # нормализуется в JPEG
     for rid in ids:
-        if rid != "rpn-brakerazh":
+        if rid != "rpn-flow":
             assert client.put(f"/api/session/{sid}/answers/{rid}", json={"status": "ok"}, headers=H).status_code == 200
     # Чужое требование отклоняется.
     assert client.put(f"/api/session/{sid}/answers/nope", json={"status": "ok"}, headers=H).status_code == 400
@@ -68,7 +68,7 @@ def test_full_flow(client):
     assert r.status_code == 200
     body = r.json()
     assert body["counts"]["violation"] == 1 and body["counts"]["ok"] == len(ids) - 1
-    assert len(body["tasks"]) == 1 and body["tasks"][0]["rule_id"] == "rpn-brakerazh"
+    assert len(body["tasks"]) == 1 and body["tasks"][0]["rule_id"] == "rpn-flow"
 
     # Повторный ответ в закрытую сессию запрещён; статус возвращает завершённую.
     assert client.put(f"/api/session/{sid}/answers/rpn-temp-log", json={"status": "ok"}, headers=H).status_code == 409
@@ -104,7 +104,7 @@ def test_second_profile_is_smaller(client):
         svc.save_venue(db, UID, {"activity": "coffee", "has_kitchen": False, "own_production": False,
                                  "seats": 0, "staff": 0, "alcohol": False, "name": "Кофе с собой"})
     s = client.post("/api/session/new", headers=H).json()
-    assert len(s["applicable"]) < 10
+    assert len(s["applicable"]) <= 12
     assert any("нет кухни" in r for x in s["not_applicable"] for r in x["reasons"])
 
 

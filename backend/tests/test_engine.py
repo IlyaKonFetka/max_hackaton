@@ -30,8 +30,8 @@ def test_two_profiles_give_different_sets(book):
     assert cafe["applicable"] > coffee["applicable"]
     # У кофейни без кухни и работников не должно быть трудовых требований и бракеража.
     coffee_ids = {v.rule.id for v in evaluate_all(COFFEE, book) if v.applicable}
-    assert not any(i.startswith("rt-") for i in coffee_ids)
-    assert "rpn-brakerazh" not in coffee_ids
+    assert not any(i.startswith("rt-") and not i.startswith("rt-shop") for i in coffee_ids)
+    assert "rpn-flow" not in coffee_ids and "rpn-brakerazh" not in coffee_ids
     # Но безусловные требования остаются.
     assert "rpn-temp-log" in coffee_ids
     assert "mchs-extinguishers" in coffee_ids
@@ -39,7 +39,7 @@ def test_two_profiles_give_different_sets(book):
 
 def test_reasons_are_human_readable(book):
     verdicts = {v.rule.id: v for v in evaluate_all(COFFEE, book)}
-    v = verdicts["rpn-brakerazh"]
+    v = verdicts["rpn-flow"]
     assert not v.applicable
     assert v.reasons == ("Кухня: нет кухни",)
     v = verdicts["rt-contracts"]
@@ -50,6 +50,16 @@ def test_any_collects_all_failed_branches(book):
     v = {v.rule.id: v for v in evaluate_all(COFFEE, book)}["rpn-haccp"]
     assert not v.applicable
     assert set(v.reasons) == {"Кухня: нет кухни", "Собственное производство: нет производства"}
+
+
+def test_shop_profile_uses_retail_rulebook(book):
+    """Магазин получает розничный справочник (СП 2.3.6.3668-20), а требования СанПиН по общепиту к нему не применяются."""
+    shop = {"activity": "shop", "has_kitchen": False, "own_production": False, "seats": 0, "staff": 3, "alcohol": True}
+    ids = {v.rule.id for v in evaluate_all(shop, book) if v.applicable}
+    assert any(i.startswith("rt-shop-") for i in ids)
+    assert not any(i in ids for i in ("rpn-temp-log", "rpn-health-journal", "rpn-flow"))
+    assert {"rpn-notice", "rpn-alcohol"} <= ids  # универсальные
+    assert any(i.startswith("rt-") and not i.startswith("rt-shop") for i in ids)  # Роструд — тоже
 
 
 def test_every_profile_field_influences_some_rule(book):

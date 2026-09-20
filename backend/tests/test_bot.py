@@ -274,7 +274,7 @@ async def test_tasks_flow(fake):
         task_id = tasks[0].id
 
     await h.on_message(msg("/tasks"))
-    assert "температуры" in fake.last()["text"]
+    assert "термометр" in fake.last()["text"].lower()
     btns = fake.buttons(fake.last())
     assert any(b.payload == f"assign|{task_id}" for b in btns)
 

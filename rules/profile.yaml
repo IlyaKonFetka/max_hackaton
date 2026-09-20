@@ -19,10 +19,11 @@ fields:
       - { value: bakery,     label: "Пекарня с залом" }
       - { value: streetfood, label: "Стрит-фуд / киоск" }
       - { value: bar,        label: "Бар" }
+      - { value: shop,       label: "Магазин у дома (продукты)" }
 
   - key: has_kitchen
     label: "Кухня"
-    question: "Есть ли собственная кухня — готовите ли блюда на месте?"
+    question: "Есть ли собственная кухня — готовите ли блюда или кулинарию на месте?"
     type: bool
     options:
       - { value: true,  label: "Да, готовим" }
