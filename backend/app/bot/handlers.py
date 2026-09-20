@@ -14,7 +14,7 @@ from maxapi.types import BotStarted, MessageCallback, MessageCreated
 from sqlalchemy import select
 
 from ..config import settings
-from ..db import BotState, CheckSession, ShiftCheck, ShiftItem, ShiftPhoto, Task, User, Venue, db_session, utcnow
+from ..db import BotState, CheckSession, Membership, ShiftCheck, ShiftItem, ShiftPhoto, Task, User, Venue, db_session, utcnow
 from ..engine import summary
 from ..rulebook import get_rulebook
 from ..services import sessions as svc
@@ -203,25 +203,192 @@ async def show_status(chat_id: int, user_id: int):
 
 async def show_tasks(chat_id: int, user_id: int):
     with db_session() as db:
-        tasks = svc.open_tasks(db, user_id)
+        venue, m = svc.role_of(db, user_id)
+        if m is not None and m.role == "staff":
+            tasks = svc.tasks_for_assignee(db, user_id)
+            staff = True
+        else:
+            tasks = svc.open_tasks(db, user_id)
+            staff = False
         if not tasks:
             await _send(chat_id, "Открытых задач нет.")
             return
-        await _send(chat_id, f"Открытые задачи — {len(tasks)}:")
+        await _send(chat_id, f"{'Мои задачи' if staff else 'Открытые задачи'} — {len(tasks)}:")
         for t in tasks[:15]:
             overdue = t.due_date < utcnow()
-            who = f"\nОтветственный: {t.assignee_name}" if t.assignee_name else ""
+            who = "" if staff else (f"\nОтветственный: {t.assignee_name}" if t.assignee_name else "")
             text = f"{'⚠ Просрочено' if overdue else 'До'} {_fmt_date(t.due_date)}\n{t.title}{who}"
-            await _send(chat_id, text, attachments=[kb.task_kb(t.id, bool(t.assignee_name))])
+            markup = kb.staff_task_kb(t.id) if staff else kb.task_kb(t.id, bool(t.assignee_name))
+            await _send(chat_id, text, attachments=[markup])
 
 
 async def _show_task_for_assignee(chat_id: int, task: Task):
     await _send(
         chat_id,
         f"Вам назначена задача:\n{task.title}\nСрок: {_fmt_date(task.due_date)}\n\n"
-        "Когда сделаете — нажмите «Выполнено» и пришлите фото результата.",
-        attachments=[kb.task_kb(task.id, True)],
+        "Когда сделаете — нажмите кнопку и пришлите фото результата: оно попадёт в акт.",
+        attachments=[kb.staff_task_kb(task.id)],
     )
+
+
+async def show_staff_home(chat_id: int, user_id: int, venue: Venue):
+    with db_session() as db:
+        tasks = svc.tasks_for_assignee(db, user_id)
+        n = len(tasks)
+        nearest = tasks[0] if tasks else None
+        due = _fmt_date(nearest.due_date) if nearest else ""
+    lines = [f"{venue.name} — вы сотрудник."]
+    if n:
+        lines.append(f"Открытых задач: {n}. Ближайший срок: {due} — {nearest.title}")
+    else:
+        lines.append("Открытых задач нет.")
+    lines.append("Чек-лист смены — по одному пункту, фото засчитывается как «выполнено».")
+    await _send(chat_id, "\n".join(lines), attachments=[kb.staff_home_kb(n)])
+
+
+async def _is_staff(user_id: int) -> bool:
+    with db_session() as db:
+        _v, m = svc.role_of(db, user_id)
+    return m is not None and m.role == "staff"
+
+
+async def _owner_only(chat_id: int, user_id: int) -> Venue | None:
+    """Заведение, если пользователь — владелец; иначе сообщение и None."""
+    with db_session() as db:
+        venue = svc.current_venue(db, user_id)
+    if venue is None:
+        await _send(chat_id, texts.OWNER_ONLY)
+    return venue
+
+
+# ---------- команда ----------
+
+async def show_team(chat_id: int, user_id: int):
+    venue = await _owner_only(chat_id, user_id)
+    if venue is None:
+        return
+    with db_session() as db:
+        staff = svc.staff_of(db, venue.id)
+        rows = []
+        for m in staff:
+            state = "в MAX" if m.joined_at else "приглашён, ещё не открыл бота"
+            phone = f" · ···{m.phone[-4:]}" if m.phone else ""
+            rows.append(f"• {m.name or 'Сотрудник'}{phone} — {state}")
+    text = f"{venue.name}\nВладелец: вы.\n"
+    text += ("Сотрудники:\n" + "\n".join(rows)) if rows else "Сотрудников пока нет."
+    text += "\n\nСотрудник видит свои задачи и чек-лист смены; назначать и менять профиль может только владелец."
+    await _send(chat_id, text, attachments=[kb.team_kb()])
+
+
+async def _invite_from_contact(chat_id: int, user_id: int, attachment):
+    from urllib.parse import quote
+
+    payload = getattr(attachment, "payload", None)
+    name, phone, max_uid, username = "", "", None, None
+    try:
+        name = payload.vcf.full_name or ""
+        phone = payload.vcf.phone or ""
+    except Exception:  # noqa: BLE001
+        pass
+    mi = getattr(payload, "max_info", None)
+    if mi is not None:
+        max_uid = getattr(mi, "user_id", None)
+        username = getattr(mi, "username", None)
+        if not name:
+            name = f"{getattr(mi, 'first_name', '')} {getattr(mi, 'last_name', '') or ''}".strip()
+    with db_session() as db:
+        _set_state(db, user_id, "idle", {})
+        venue = svc.current_venue(db, user_id)
+        if venue is None:
+            await _send(chat_id, texts.OWNER_ONLY)
+            return
+        if max_uid and max_uid == user_id:
+            await _send(chat_id, "Это ваш собственный контакт — выберите сотрудника.")
+            return
+        m = svc.invite_staff(db, venue, user_id, name, phone, max_uid)
+        mid, venue_name = m.id, venue.name
+        joined = m.joined_at is not None
+        assignee_user = db.get(User, max_uid) if max_uid else None
+    if joined:
+        await _send(chat_id, f"{name or 'Сотрудник'} уже в команде.")
+        return
+    invite = (f"Вас добавили в команду «{venue_name}» в MAX. Здесь будут ваши задачи и чек-лист смены.\n"
+              f"Откройте, чтобы присоединиться: https://max.ru/{settings.bot_username}?start=join_{mid}")
+    if assignee_user and assignee_user.chat_id:
+        try:
+            await _send(assignee_user.chat_id, invite)
+            await _send(chat_id, f"{name or 'Сотрудник'} получил приглашение в MAX.")
+            return
+        except Exception:  # noqa: BLE001
+            pass
+    share_url = f"https://max.ru/:share?text={quote(invite, safe='')}"
+    profile_url = f"https://max.ru/{username}" if username else None
+    await _send(chat_id, f"{name or 'Сотрудник'} записан. Нажмите кнопку — откроется отправка в MAX с готовым приглашением.",
+                attachments=[kb.assign_result_kb(share_url, profile_url)])
+
+
+async def _join_team(chat_id: int, user_id: int, raw_id: str):
+    """Сотрудник открыл ссылку-приглашение: сверяем аккаунт или просим подтвердить номер."""
+    try:
+        mid = int(raw_id)
+    except ValueError:
+        await show_status_or_onboarding(chat_id, user_id)
+        return
+    with db_session() as db:
+        m = db.get(Membership, mid)
+        venue = db.get(Venue, m.venue_id) if m else None
+        if m is None or venue is None:
+            await _send(chat_id, "Приглашение не найдено.")
+            return
+        if venue.owner_id == user_id:
+            await _send(chat_id, "Это ссылка для сотрудника — перешлите её ему.")
+            return
+        if m.user_id and m.user_id != user_id:
+            await _send(chat_id, "Это приглашение для другого человека.")
+            return
+        if not m.user_id and m.phone:
+            _set_state(db, user_id, f"join:{mid}", {})
+            await _send(chat_id, f"Приглашение в «{venue.name}» выписано на номер ···{m.phone[-4:]}. Подтвердите — отправьте свой контакт.",
+                        attachments=[kb.claim_kb()])
+            return
+        u = db.get(User, user_id)
+        svc.join_staff(db, m, user_id, f"{u.first_name} {u.last_name}".strip() if u else "")
+        owner = db.get(User, venue.owner_id)
+        name = m.name
+    await _send(chat_id, f"Вы в команде «{venue.name}».")
+    await show_staff_home(chat_id, user_id, venue)
+    if owner and owner.chat_id:
+        await _send(owner.chat_id, f"{name or 'Сотрудник'} присоединился к команде.")
+
+
+async def _join_with_contact(chat_id: int, user_id: int, mid: int, attachment):
+    payload = getattr(attachment, "payload", None)
+    phone = ""
+    try:
+        phone = payload.vcf.phone or ""
+    except Exception:  # noqa: BLE001
+        pass
+    mi = getattr(payload, "max_info", None)
+    contact_uid = getattr(mi, "user_id", None) if mi is not None else None
+    with db_session() as db:
+        _set_state(db, user_id, "idle", {})
+        m = db.get(Membership, mid)
+        venue = db.get(Venue, m.venue_id) if m else None
+        if m is None or venue is None:
+            await _send(chat_id, "Приглашение не найдено.")
+            return
+        own_contact = contact_uid is None or contact_uid == user_id
+        if not own_contact or svc.norm_phone(phone) != m.phone:
+            await _send(chat_id, "Номер не совпадает с приглашением. Попросите владельца пригласить вас заново.")
+            return
+        u = db.get(User, user_id)
+        svc.join_staff(db, m, user_id, f"{u.first_name} {u.last_name}".strip() if u else "")
+        owner = db.get(User, venue.owner_id)
+        name = m.name
+    await _send(chat_id, f"Вы в команде «{venue.name}».")
+    await show_staff_home(chat_id, user_id, venue)
+    if owner and owner.chat_id:
+        await _send(owner.chat_id, f"{name or 'Сотрудник'} присоединился к команде.")
 
 
 # ---------- чек-лист смены (живёт в боте) ----------
@@ -280,7 +447,7 @@ def _next_unanswered(rules: list, items: dict[str, ShiftItem], skipped: list[str
 
 async def show_shift(chat_id: int, user_id: int):
     with db_session() as db:
-        venue = svc.current_venue(db, user_id)
+        venue, _m = svc.role_of(db, user_id)
         if venue is None:
             await start_onboarding(chat_id, user_id)
             return
@@ -446,14 +613,19 @@ async def on_bot_started(event: BotStarted):
     if payload.startswith("task_"):
         await _claim_task(event.chat_id, event.user.user_id, payload[5:])
         return
+    if payload.startswith("join_"):
+        await _join_team(event.chat_id, event.user.user_id, payload[5:])
+        return
     await show_status_or_onboarding(event.chat_id, event.user.user_id)
 
 
 async def show_status_or_onboarding(chat_id: int, user_id: int):
     with db_session() as db:
-        venue = svc.current_venue(db, user_id)
+        venue, m = svc.role_of(db, user_id)
     if venue is None:
         await start_onboarding(chat_id, user_id)
+    elif m is not None and m.role == "staff":
+        await show_staff_home(chat_id, user_id, venue)
     else:
         await show_status(chat_id, user_id)
 
@@ -498,8 +670,15 @@ async def _claim_task(chat_id: int, user_id: int, raw_id: str):
 def _do_claim(db, task: Task, user_id: int) -> None:
     task.assignee_user_id = user_id
     u = db.get(User, user_id)
-    if u and not task.assignee_name:
-        task.assignee_name = f"{u.first_name} {u.last_name}".strip()
+    name = f"{u.first_name} {u.last_name}".strip() if u else ""
+    if not task.assignee_name:
+        task.assignee_name = name
+    venue = db.get(Venue, task.venue_id)
+    if venue is not None:
+        m = svc.find_staff(db, venue.id, user_id=user_id, phone=task.assignee_phone)
+        if m is None:
+            m = svc.invite_staff(db, venue, task.owner_id, task.assignee_name, task.assignee_phone, user_id)
+        svc.join_staff(db, m, user_id, name)
     db.flush()
 
 
@@ -553,15 +732,21 @@ async def on_message(event: MessageCreated):
         if cmd == "/start":
             await show_status_or_onboarding(chat_id, user_id)
         elif cmd == "/profile":
-            await start_onboarding(chat_id, user_id, intro=False)
+            if await _is_staff(user_id):
+                await _send(chat_id, texts.OWNER_ONLY)
+            else:
+                await start_onboarding(chat_id, user_id, intro=False)
         elif cmd == "/status":
-            await show_status(chat_id, user_id)
+            await show_status_or_onboarding(chat_id, user_id)
         elif cmd == "/tasks":
             await show_tasks(chat_id, user_id)
         elif cmd == "/shift":
             await show_shift(chat_id, user_id)
+        elif cmd == "/team":
+            await show_team(chat_id, user_id)
         elif cmd == "/act":
-            await _resend_act(chat_id, user_id)
+            if await _owner_only(chat_id, user_id):
+                await _resend_act(chat_id, user_id)
         else:
             await _send(chat_id, texts.HELP)
         return
@@ -574,6 +759,12 @@ async def on_message(event: MessageCreated):
             return
         if atype.endswith("contact") and state.startswith("claim:"):
             await _claim_with_contact(chat_id, user_id, int(state.split(":")[1]), a)
+            return
+        if atype.endswith("contact") and state.startswith("join:"):
+            await _join_with_contact(chat_id, user_id, int(state.split(":")[1]), a)
+            return
+        if atype.endswith("contact") and state == "invite":
+            await _invite_from_contact(chat_id, user_id, a)
             return
         if atype.endswith("image"):
             url = getattr(getattr(a, "payload", None), "url", None)
@@ -609,6 +800,12 @@ async def on_message(event: MessageCreated):
     if state.startswith("assign:"):
         await _send(chat_id, "Нажмите «Отправить контакт сотрудника» или «Отмена».", attachments=[kb.assign_kb()])
         return
+    if state == "invite":
+        await _send(chat_id, "Выберите контакт сотрудника или нажмите «Отмена».", attachments=[kb.invite_kb()])
+        return
+    if state.startswith("claim:") or state.startswith("join:"):
+        await _send(chat_id, "Подтвердите номер — отправьте свой контакт кнопкой.", attachments=[kb.claim_kb()])
+        return
     if state.startswith("done:"):
         await _send(chat_id, "Пришлите фото результата или закройте без фото.", attachments=[kb.done_kb(int(state.split(':')[1]))])
         return
@@ -640,6 +837,9 @@ async def on_callback(cb: MessageCallback):
             field = get_rulebook().field(parts[1])
             await _replace(cb, f"{field.question}\n— пропущено", [], notification="Пропущено")
             await _advance(chat_id, user_id, field.key, None)
+        elif head == "onb" and await _is_staff(user_id):
+            await cb.ack(notification="Только владелец")
+            await _send(chat_id, texts.OWNER_ONLY)
         elif head == "onb":
             if parts[1] == "confirm":
                 await _replace(cb, (cb.message.body.text or "Профиль") + "\n\n✓ Подтверждено", [], notification="Считаю применимые требования…")
@@ -658,8 +858,28 @@ async def on_callback(cb: MessageCallback):
             await show_tasks(chat_id, user_id)
         elif head == "check":
             await cb.ack(notification="Новая самопроверка")
-            await _new_check(chat_id, user_id)
+            if await _owner_only(chat_id, user_id):
+                await _new_check(chat_id, user_id)
+        elif head == "team":
+            if parts[1] == "invite":
+                if await _owner_only(chat_id, user_id):
+                    with db_session() as db:
+                        _set_state(db, user_id, "invite", {})
+                    await cb.ack(notification="Кого добавить?")
+                    await _send(chat_id, "Выберите контакт сотрудника — я подготовлю приглашение.", attachments=[kb.invite_kb()])
+                else:
+                    await cb.ack(notification="Только владелец")
+            else:
+                await cb.ack(notification="Команда")
+                await show_team(chat_id, user_id)
         elif head == "assign":
+            with db_session() as db:
+                task = db.get(Task, int(parts[1]))
+                is_owner = task is not None and task.owner_id == user_id
+            if not is_owner:
+                await cb.ack(notification="Только владелец")
+                await _send(chat_id, texts.OWNER_ONLY)
+                return
             with db_session() as db:
                 _set_state(db, user_id, f"assign:{parts[1]}", {})
             await cb.ack(notification="Кого назначить?")
@@ -802,6 +1022,8 @@ async def _assign_from_contact(chat_id: int, user_id: int, task_id: int, attachm
         title, due = task.title, _fmt_date(task.due_date)
         venue = db.get(Venue, task.venue_id)
         venue_name = venue.name if venue else "заведение"
+        if venue is not None:
+            svc.invite_staff(db, venue, user_id, task.assignee_name, phone, max_uid)
         assignee_user = db.get(User, max_uid) if max_uid else None
 
     invite = _invite_text(venue_name, title, due, task_id)
@@ -809,7 +1031,7 @@ async def _assign_from_contact(chat_id: int, user_id: int, task_id: int, attachm
     if assignee_user and assignee_user.chat_id:
         # Сотрудник уже общался с ботом — задача уходит ему напрямую.
         try:
-            await _send(assignee_user.chat_id, invite, attachments=[kb.task_kb(task_id, True)])
+            await _send(assignee_user.chat_id, invite, attachments=[kb.staff_task_kb(task_id)])
             delivered = True
         except Exception:  # noqa: BLE001
             delivered = False
@@ -862,7 +1084,7 @@ async def _attach_shift_photo(chat_id: int, user_id: int, url: str):
     Каждое фото — своя строка (ShiftPhoto): параллельная присылка нескольких фото не теряет ни одно.
     """
     with db_session() as db:
-        venue = svc.current_venue(db, user_id)
+        venue, _m = svc.role_of(db, user_id)
         if venue is None:
             return
         today = _local_now().strftime("%Y-%m-%d")

@@ -27,6 +27,9 @@ def _photo_url(rel: str | None) -> str | None:
 def _venue_or_404(db, user: MaxUser) -> Venue:
     v = svc.current_venue(db, user.id)
     if v is None:
+        _v, m = svc.role_of(db, user.id)
+        if m is not None and m.role == "staff":
+            raise HTTPException(status_code=403, detail="Самопроверка и акт — для владельца заведения. Ваши задачи и чек-лист смены — в чате с ботом.")
         raise HTTPException(status_code=404, detail="Профиль заведения не заполнен — пройдите онбординг в боте")
     return v
 

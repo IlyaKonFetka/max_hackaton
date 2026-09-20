@@ -71,6 +71,26 @@ class Venue(Base):
     sessions: Mapped[list["CheckSession"]] = relationship(back_populates="venue")
 
 
+class Membership(Base):
+    """Роль пользователя в заведении: owner — создал профиль; staff — сотрудник (задачи, чек-лист смены).
+
+    Сотрудник появляется при назначении задачи или приглашении через /team (тогда user_id ещё пуст,
+    известны имя и телефон), а «присоединяется» (user_id, joined_at), когда открывает бота по ссылке
+    и проходит проверку — по аккаунту MAX или по совпадению номера.
+    """
+
+    __tablename__ = "memberships"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    venue_id: Mapped[int] = mapped_column(ForeignKey("venues.id"), index=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)
+    role: Mapped[str] = mapped_column(String(16), default="staff")  # owner | staff
+    name: Mapped[str] = mapped_column(String(200), default="")
+    phone: Mapped[str] = mapped_column(String(64), default="")  # нормализованный, последние 10 цифр
+    invited_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    joined_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class CheckSession(Base):
     """Одна самопроверка по применимым требованиям."""
 

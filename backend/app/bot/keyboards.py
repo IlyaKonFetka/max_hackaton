@@ -85,17 +85,48 @@ def status_kb(has_open_session: bool, session_id: int | None, open_tasks: int):
         kb.row(CallbackButton(text=f"Задачи ({open_tasks})", payload="tasks"))
     kb.row(
         CallbackButton(text="Чек-лист смены", payload="shift|show"),
-        CallbackButton(text="Изменить профиль", payload="onb|restart"),
+        CallbackButton(text="Команда", payload="team|show"),
     )
+    kb.row(CallbackButton(text="Изменить профиль", payload="onb|restart"))
     return kb.as_markup()
 
 
 def task_kb(task_id: int, assigned: bool):
+    """Клавиатура владельца: закрыть или (пере)назначить."""
     kb = InlineKeyboardBuilder()
     kb.row(
         CallbackButton(text="Выполнено", payload=f"done|{task_id}"),
         CallbackButton(text=("Сменить ответственного" if assigned else "Назначить ответственного"), payload=f"assign|{task_id}"),
     )
+    return kb.as_markup()
+
+
+def staff_task_kb(task_id: int):
+    """Клавиатура сотрудника: только закрыть, фото — основной путь."""
+    kb = InlineKeyboardBuilder()
+    kb.row(CallbackButton(text="📷 Выполнено — приложить фото", payload=f"done|{task_id}"))
+    kb.row(CallbackButton(text="Выполнено без фото", payload=f"done_nophoto|{task_id}"))
+    return kb.as_markup()
+
+
+def staff_home_kb(open_tasks: int):
+    kb = InlineKeyboardBuilder()
+    kb.row(CallbackButton(text="Чек-лист смены", payload="shift|show"))
+    if open_tasks:
+        kb.row(CallbackButton(text=f"Мои задачи ({open_tasks})", payload="tasks"))
+    return kb.as_markup()
+
+
+def team_kb():
+    kb = InlineKeyboardBuilder()
+    kb.row(CallbackButton(text="Добавить сотрудника", payload="team|invite"))
+    return kb.as_markup()
+
+
+def invite_kb():
+    kb = InlineKeyboardBuilder()
+    kb.row(RequestContactButton(text="Выбрать контакт сотрудника"))
+    kb.row(CallbackButton(text="Отмена", payload="cancel"))
     return kb.as_markup()
 
 

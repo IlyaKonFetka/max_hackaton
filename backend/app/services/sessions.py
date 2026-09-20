@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..db import Answer, CheckSession, Task, User, Venue, utcnow
+from ..db import Answer, CheckSession, Membership, Task, User, Venue, utcnow
 from ..engine import Rule, evaluate_all
 from ..rulebook import get_rulebook
 
@@ -33,9 +33,89 @@ def get_or_create_user(db: Session, user_id: int, first_name: str = "", last_nam
 
 
 def current_venue(db: Session, user_id: int) -> Venue | None:
+    """Заведение, которым пользователь владеет."""
     return db.execute(
         select(Venue).where(Venue.owner_id == user_id).order_by(Venue.created_at.desc())
     ).scalars().first()
+
+
+# ---------- роли ----------
+
+def norm_phone(p: str | None) -> str:
+    return "".join(ch for ch in (p or "") if ch.isdigit())[-10:]
+
+
+def role_of(db: Session, user_id: int) -> tuple[Venue | None, Membership | None]:
+    """(заведение, членство) пользователя: владелец приоритетнее; сотрудник — по присоединённому членству."""
+    v = current_venue(db, user_id)
+    if v is not None:
+        m = ensure_owner_membership(db, v)
+        return v, m
+    m = db.execute(
+        select(Membership).where(Membership.user_id == user_id, Membership.role == "staff", Membership.joined_at.is_not(None))
+        .order_by(Membership.joined_at.desc())
+    ).scalars().first()
+    if m is None:
+        return None, None
+    return db.get(Venue, m.venue_id), m
+
+
+def ensure_owner_membership(db: Session, venue: Venue) -> Membership:
+    m = db.execute(
+        select(Membership).where(Membership.venue_id == venue.id, Membership.user_id == venue.owner_id, Membership.role == "owner")
+    ).scalars().first()
+    if m is None:
+        u = db.get(User, venue.owner_id)
+        m = Membership(venue_id=venue.id, user_id=venue.owner_id, role="owner", joined_at=utcnow(),
+                       name=f"{u.first_name} {u.last_name}".strip() if u else "")
+        db.add(m)
+        db.flush()
+    return m
+
+
+def find_staff(db: Session, venue_id: int, user_id: int | None = None, phone: str | None = None) -> Membership | None:
+    q = select(Membership).where(Membership.venue_id == venue_id, Membership.role == "staff")
+    if user_id is not None:
+        m = db.execute(q.where(Membership.user_id == user_id)).scalars().first()
+        if m:
+            return m
+    ph = norm_phone(phone)
+    if ph:
+        return db.execute(q.where(Membership.phone == ph)).scalars().first()
+    return None
+
+
+def invite_staff(db: Session, venue: Venue, invited_by: int, name: str, phone: str | None,
+                 user_id: int | None) -> Membership:
+    """Создаёт или обновляет запись сотрудника (ещё не присоединённого)."""
+    m = find_staff(db, venue.id, user_id=user_id, phone=phone)
+    if m is None:
+        m = Membership(venue_id=venue.id, role="staff", invited_by=invited_by)
+        db.add(m)
+    if name and not m.name:
+        m.name = name
+    if phone:
+        m.phone = norm_phone(phone)
+    if user_id and not m.user_id:
+        m.user_id = user_id
+    db.flush()
+    return m
+
+
+def join_staff(db: Session, m: Membership, user_id: int, name: str = "") -> Membership:
+    m.user_id = user_id
+    if name and not m.name:
+        m.name = name
+    if m.joined_at is None:
+        m.joined_at = utcnow()
+    db.flush()
+    return m
+
+
+def staff_of(db: Session, venue_id: int) -> list[Membership]:
+    return list(db.execute(
+        select(Membership).where(Membership.venue_id == venue_id, Membership.role == "staff").order_by(Membership.created_at)
+    ).scalars().all())
 
 
 def save_venue(db: Session, user_id: int, profile: dict) -> Venue:
@@ -50,6 +130,7 @@ def save_venue(db: Session, user_id: int, profile: dict) -> Venue:
     else:
         v.name, v.profile, v.region = name, clean, region
     db.flush()
+    ensure_owner_membership(db, v)
     return v
 
 

@@ -331,3 +331,105 @@ async def test_tasks_flow(fake):
     assert "закрыта" in fake.last()["text"]
     with db_session() as db:
         assert svc.open_tasks(db, UID) == []
+
+
+@pytest.mark.asyncio
+async def test_team_roles(fake):
+    """Владелец приглашает сотрудника через /team; тот присоединяется по ссылке с подтверждением номера,
+    видит свой экран, чек-лист смены и только свои задачи; владельческие действия ему закрыты."""
+    owner_id, owner_chat = 777050, 555050
+    staff_id, staff_chat = 777051, 555051
+    owner = SimpleNamespace(user_id=owner_id, first_name="Марина", last_name="", username=None)
+    staff = SimpleNamespace(user_id=staff_id, first_name="Иван", last_name="Повар", username=None)
+
+    def m(u, chat, text, attachments=None):
+        return SimpleNamespace(message=SimpleNamespace(
+            recipient=SimpleNamespace(chat_id=chat, user_id=None), sender=u,
+            body=SimpleNamespace(text=text, attachments=attachments or [], mid="m")))
+
+    def cbk(u, chat, payload):
+        cb = FakeCallback(payload)
+        cb.callback.user = u
+        cb.message.recipient = SimpleNamespace(chat_id=chat)
+        return cb
+
+    with db_session() as db:
+        svc.get_or_create_user(db, owner_id, "Марина", chat_id=owner_chat)
+        v = svc.save_venue(db, owner_id, {"activity": "cafe", "has_kitchen": True, "own_production": True,
+                                          "seats": 35, "staff": 10, "alcohol": False, "name": "Пекарня"})
+        s = svc.start_session(db, v)
+        svc.set_answer(db, s, "rpn-temp-log", "violation")
+        svc.set_answer(db, s, "rpn-flow", "violation")
+        t1, t2 = svc.finish_session(db, s, owner_id)
+        task_id = t1.id
+
+    # /team пуст → приглашение контактом → кнопка :share со ссылкой join_
+    await h.on_message(m(owner, owner_chat, "/team"))
+    assert "Сотрудников пока нет" in fake.last()["text"]
+    await h.on_callback(cbk(owner, owner_chat, "team|invite"))
+    contact = SimpleNamespace(type="contact", payload=SimpleNamespace(
+        vcf=SimpleNamespace(full_name="Иван Повар", phone="+7 999 000-00-00"), max_info=None))
+    await h.on_message(m(owner, owner_chat, "", [contact]))
+    share = next(getattr(b, "url", "") for b in fake.buttons(fake.last()) if "max.ru/:share" in getattr(b, "url", ""))
+    from urllib.parse import unquote
+    mid = unquote(share).split("?start=join_")[1].split()[0]
+
+    # Сотрудник открывает ссылку: номер подтверждаем контактом; чужой номер — отказ, свой — в команде
+    await h.on_bot_started(SimpleNamespace(user=staff, chat_id=staff_chat, payload=f"join_{mid}"))
+    assert "Подтвердите" in fake.last()["text"]
+    wrong = SimpleNamespace(type="contact", payload=SimpleNamespace(vcf=SimpleNamespace(full_name="Иван", phone="+79991112233"), max_info=None))
+    await h.on_message(m(staff, staff_chat, "", [wrong]))
+    assert "не совпадает" in fake.last()["text"]
+    await h.on_bot_started(SimpleNamespace(user=staff, chat_id=staff_chat, payload=f"join_{mid}"))
+    right = SimpleNamespace(type="contact", payload=SimpleNamespace(vcf=SimpleNamespace(full_name="Иван Повар", phone="89990000000"), max_info=None))
+    fake.sent.clear()
+    await h.on_message(m(staff, staff_chat, "", [right]))
+    assert any(x["chat_id"] == staff_chat and "в команде" in x["text"] for x in fake.sent)
+    assert any(x["chat_id"] == staff_chat and "вы сотрудник" in x["text"] for x in fake.sent)
+    assert any(x["chat_id"] == owner_chat and "присоединился" in x["text"] for x in fake.sent)
+
+    # /start сотрудника — его экран, не онбординг; /team владельца показывает его «в MAX»
+    await h.on_message(m(staff, staff_chat, "/start"))
+    assert "вы сотрудник" in fake.last()["text"]
+    await h.on_message(m(owner, owner_chat, "/team"))
+    assert "Иван Повар" in fake.last()["text"] and "в MAX" in fake.last()["text"]
+
+    # Владелец назначает задачу этому же контакту — сотрудник уже общался с ботом, задача уходит напрямую
+    await h.on_callback(cbk(owner, owner_chat, f"assign|{task_id}"))
+    with db_session() as db:
+        pass
+    contact_linked = SimpleNamespace(type="contact", payload=SimpleNamespace(
+        vcf=SimpleNamespace(full_name="Иван Повар", phone="+79990000000"),
+        max_info=SimpleNamespace(user_id=staff_id, first_name="Иван", last_name="Повар", username=None)))
+    fake.sent.clear()
+    await h.on_message(m(owner, owner_chat, "", [contact_linked]))
+    direct = next(x for x in fake.sent if x["chat_id"] == staff_chat)
+    assert "Вам назначена задача" in direct["text"]
+    staff_btns = fake.buttons(direct)
+    assert not any("assign|" in getattr(b, "payload", "") for b in staff_btns), "сотруднику нельзя переназначать"
+    assert any("фото" in getattr(b, "text", "").lower() for b in staff_btns)
+
+    # /tasks сотрудника — только его задача (одна из двух), без кнопки назначения
+    fake.sent.clear()
+    await h.on_message(m(staff, staff_chat, "/tasks"))
+    task_msgs = [x for x in fake.sent if fake.buttons(x)]
+    assert len(task_msgs) == 1 and "Мои задачи — 1" in fake.sent[0]["text"]
+    assert not any("assign|" in getattr(b, "payload", "") for b in fake.buttons(task_msgs[0]))
+
+    # Владельческие действия сотруднику закрыты
+    await h.on_message(m(staff, staff_chat, "/profile"))
+    assert "владельцу" in fake.last()["text"]
+    await h.on_message(m(staff, staff_chat, "/act"))
+    assert "владельцу" in fake.last()["text"]
+    await h.on_callback(cbk(staff, staff_chat, f"assign|{task_id}"))
+    assert "владельцу" in fake.last()["text"]
+
+    # А чек-лист смены сотруднику доступен — по заведению владельца
+    await h.on_message(m(staff, staff_chat, "/shift"))
+    assert "Чек-лист смены" in fake.sent[-2]["text"] and fake.last()["text"].startswith("1/")
+
+    # Сотрудник закрывает задачу с фото → владелец уведомлён
+    await h.on_callback(cbk(staff, staff_chat, f"done|{task_id}"))
+    assert "Пришлите фото" in fake.last()["text"]
+    await h.on_callback(cbk(staff, staff_chat, f"done_nophoto|{task_id}"))
+    assert any(x["chat_id"] == owner_chat and "закрыл" in x["text"] for x in fake.sent[-3:])
