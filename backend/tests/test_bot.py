@@ -70,7 +70,11 @@ class FakeCallback:
         )
         self.answers: list = []
 
-    async def answer(self, notification=None, new_text=None, **kw):
+    async def answer(self, notification=None, new_text=None, attachments=None, **kw):
+        self.answers.append(notification)
+        self.new_text, self.new_attachments = new_text, attachments
+
+    async def ack(self, notification=None):
         self.answers.append(notification)
 
 
@@ -128,7 +132,13 @@ async def test_onboarding_to_result(fake):
     sh_btns = [b for b in fake.buttons(sh) if getattr(b, "payload", "").startswith("sh|")]
     assert len(sh_btns) >= 5
     cb = await press(sh_btns[0].payload)
-    assert cb.answers == ["Отмечено"] and fake.edited
+    assert cb.answers == ["Отмечено"]
+    # Клавиатура заменена ответом на callback: первый пункт отмечен галочкой
+    new_btns = [b for row in cb.new_attachments[0].payload.buttons for b in row]
+    assert new_btns[0].text.startswith("✅")
+    # Завершение смены заменяет сообщение и убирает кнопки
+    cb2 = await press(f"shdone|{sh_btns[0].payload.split('|')[1]}")
+    assert cb2.new_attachments == [] and "Смена закрыта" in cb2.new_text
 
     # Задач пока нет
     await h.on_message(msg("/tasks"))

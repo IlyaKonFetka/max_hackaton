@@ -56,6 +56,25 @@ async def _send(chat_id: int, text: str, attachments=None):
     return await bot.send_message(chat_id=chat_id, text=text, attachments=attachments)
 
 
+async def _replace(cb: MessageCallback, text: str | None, attachments: list, notification: str | None = None):
+    """Ответ на callback, который заменяет исходное сообщение (текст + клавиатура) — так это делается в MAX.
+
+    attachments=[] убирает клавиатуру. Если платформа отказала — пробуем edit_message, но callback подтверждаем всегда.
+    """
+    try:
+        await cb.answer(new_text=text, attachments=attachments, notification=notification)
+    except Exception as e:  # noqa: BLE001
+        log.warning("answer/replace не удался (%s), пробую edit_message", e)
+        try:
+            await bot.edit_message(message_id=cb.message.body.mid, text=text, attachments=attachments)
+        except Exception as e2:  # noqa: BLE001
+            log.warning("edit_message тоже не удался: %s", e2)
+        try:
+            await cb.ack(notification=notification)
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _local_now() -> datetime:
     return utcnow() + timedelta(hours=settings.timezone_offset_hours)
 
@@ -86,13 +105,11 @@ async def _ask(chat_id: int, field_key: str):
         await _send(chat_id, field.question, attachments=[kb.question_kb(field)])
 
 
-async def _advance(chat_id: int, user_id: int, field_key: str, value, shown_label: str | None = None,
-                   edit_message_id: str | None = None):
-    """Сохраняет ответ, при возможности заменяет вопрос на «вопрос — ответ», задаёт следующий или показывает сводку."""
+async def _advance(chat_id: int, user_id: int, field_key: str, value):
+    """Сохраняет ответ и задаёт следующий вопрос или показывает сводку профиля."""
     fields = _fields()
     keys = [f.key for f in fields]
     idx = keys.index(field_key)
-    field = fields[idx]
     with db_session() as db:
         st = _state(db, user_id)
         data = dict(st.data or {})
@@ -105,12 +122,6 @@ async def _advance(chat_id: int, user_id: int, field_key: str, value, shown_labe
         else:
             _set_state(db, user_id, "onb:confirm", data)
             next_key = None
-
-    if edit_message_id and shown_label is not None:
-        try:
-            await bot.edit_message(message_id=edit_message_id, text=f"{field.question}\n— {shown_label}", attachments=[])
-        except Exception as e:  # noqa: BLE001
-            log.debug("edit_message: %s", e)
 
     if next_key:
         await _ask(chat_id, next_key)
@@ -247,7 +258,7 @@ async def _toggle_shift(cb: MessageCallback, check_id: int, rule_id: str):
     with db_session() as db:
         sc = db.get(ShiftCheck, check_id)
         if sc is None:
-            await cb.answer(notification="Чек-лист не найден")
+            await cb.ack(notification="Чек-лист не найден")
             return
         items = dict(sc.items)
         cur = dict(items.get(rule_id) or {})
@@ -259,18 +270,14 @@ async def _toggle_shift(cb: MessageCallback, check_id: int, rule_id: str):
         venue = db.get(Venue, sc.venue_id)
         rules = _shift_rules(venue)
         rows = [(r.id, _short(r.title), (items.get(r.id) or {}).get("status") == "ok") for r in rules]
-    try:
-        await bot.edit_message(message_id=cb.message.body.mid, text=cb.message.body.text, attachments=[kb.shift_kb(check_id, rows)])
-    except Exception as e:  # noqa: BLE001
-        log.debug("edit shift: %s", e)
-    await cb.answer(notification="Отмечено")
+    await _replace(cb, cb.message.body.text, [kb.shift_kb(check_id, rows)], notification="Отмечено")
 
 
 async def _finish_shift(cb: MessageCallback, check_id: int):
     with db_session() as db:
         sc = db.get(ShiftCheck, check_id)
         if sc is None:
-            await cb.answer(notification="Чек-лист не найден")
+            await cb.ack(notification="Чек-лист не найден")
             return
         rule_items = {k: v for k, v in sc.items.items() if not k.startswith("_")}
         total = len(rule_items)
@@ -279,11 +286,10 @@ async def _finish_shift(cb: MessageCallback, check_id: int):
         rules = svc.rules_by_id()
     if missing:
         names = "\n".join(f"• {rules[r].title}" for r in missing if r in rules)
-        await cb.answer(notification=f"Отмечено {done} из {total}")
-        await _send(cb.message.recipient.chat_id, f"Смена закрыта: {done} из {total}. Не отмечено:\n{names}\n\nЭти пункты попадут в следующую самопроверку как требующие внимания.")
+        text = f"Смена закрыта: {done} из {total}. Не отмечено:\n{names}\n\nЭти пункты попадут в следующую самопроверку как требующие внимания."
+        await _replace(cb, text, [], notification=f"Отмечено {done} из {total}")
     else:
-        await cb.answer(notification="Смена закрыта")
-        await _send(cb.message.recipient.chat_id, f"Смена закрыта: все {total} пунктов отмечены. Хорошего дня.")
+        await _replace(cb, f"Смена закрыта: все {total} пунктов отмечены. Хорошего дня.", [], notification="Смена закрыта")
 
 
 # ---------- события ----------
@@ -416,7 +422,6 @@ async def on_callback(cb: MessageCallback):
     chat_id = cb.message.recipient.chat_id
     parts = payload.split("|")
     head = parts[0]
-    mid = cb.message.body.mid
 
     with db_session() as db:
         _user_from_event(db, cb.callback.user, chat_id)
@@ -425,65 +430,65 @@ async def on_callback(cb: MessageCallback):
         if head == "ans":
             field = get_rulebook().field(parts[1])
             opt = field.options[int(parts[2])]
-            await cb.answer(notification=opt.label)
-            await _advance(chat_id, user_id, field.key, opt.value, shown_label=opt.label, edit_message_id=mid)
+            await _replace(cb, f"{field.question}\n— {opt.label}", [], notification=opt.label)
+            await _advance(chat_id, user_id, field.key, opt.value)
         elif head == "skip":
             field = get_rulebook().field(parts[1])
-            await cb.answer(notification="Пропущено")
-            await _advance(chat_id, user_id, field.key, None, shown_label="пропущено", edit_message_id=mid)
+            await _replace(cb, f"{field.question}\n— пропущено", [], notification="Пропущено")
+            await _advance(chat_id, user_id, field.key, None)
         elif head == "onb":
             if parts[1] == "confirm":
-                await cb.answer(notification="Считаю применимые требования…")
+                await _replace(cb, (cb.message.body.text or "Профиль") + "\n\n✓ Подтверждено", [], notification="Считаю применимые требования…")
                 await _confirm_profile(chat_id, user_id)
             else:
-                await cb.answer(notification="Заново")
+                await cb.ack(notification="Заново")
                 await start_onboarding(chat_id, user_id, intro=False)
         elif head == "why":
-            await cb.answer(notification="Показываю")
+            await cb.ack(notification="Показываю")
             await _why(chat_id, int(parts[1]))
         elif head == "status":
-            await cb.answer(notification="Статус")
+            await cb.ack(notification="Статус")
             await show_status(chat_id, user_id)
         elif head == "tasks":
-            await cb.answer(notification="Задачи")
+            await cb.ack(notification="Задачи")
             await show_tasks(chat_id, user_id)
         elif head == "check":
-            await cb.answer(notification="Новая самопроверка")
+            await cb.ack(notification="Новая самопроверка")
             await _new_check(chat_id, user_id)
         elif head == "assign":
             with db_session() as db:
                 _set_state(db, user_id, f"assign:{parts[1]}", {})
-            await cb.answer(notification="Кого назначить?")
+            await cb.ack(notification="Кого назначить?")
             await _send(chat_id, "Отправьте контакт сотрудника — я запишу его ответственным и дам ссылку, по которой он получит задачу в MAX.", attachments=[kb.assign_kb()])
         elif head == "done":
             with db_session() as db:
                 _set_state(db, user_id, f"done:{parts[1]}", {})
-            await cb.answer(notification="Пришлите фото")
+            await cb.ack(notification="Пришлите фото")
             await _send(chat_id, "Пришлите фото «как стало» — оно попадёт в акт. Или закройте без фото.", attachments=[kb.done_kb(int(parts[1]))])
         elif head == "done_nophoto":
-            await cb.answer(notification="Закрываю")
+            await cb.ack(notification="Закрываю")
             await _close_task(chat_id, user_id, int(parts[1]), None)
         elif head == "cancel":
             with db_session() as db:
                 _set_state(db, user_id, "idle", {})
-            await cb.answer(notification="Отменено")
+            await cb.ack(notification="Отменено")
         elif head == "geo":
             with db_session() as db:
                 _set_state(db, user_id, "idle", {})
-            await cb.answer(notification="Пропущено")
+            await cb.ack(notification="Пропущено")
         elif head == "shift":
-            await cb.answer(notification="Чек-лист")
+            await cb.ack(notification="Чек-лист")
             await show_shift(chat_id, user_id)
         elif head == "sh":
             await _toggle_shift(cb, int(parts[1]), parts[2])
         elif head == "shdone":
             await _finish_shift(cb, int(parts[1]))
         else:
-            await cb.answer(notification="Неизвестное действие")
+            await cb.ack(notification="Неизвестное действие")
     except Exception as e:  # noqa: BLE001
         log.exception("callback %s: %s", payload, e)
         try:
-            await cb.answer(notification="Что-то пошло не так, попробуйте ещё раз")
+            await cb.ack(notification="Что-то пошло не так, попробуйте ещё раз")
         except Exception:  # noqa: BLE001
             pass
         await _send(chat_id, "Произошла ошибка, но всё сохранено. Наберите /status, чтобы продолжить.")
