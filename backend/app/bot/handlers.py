@@ -14,7 +14,7 @@ from maxapi.types import BotStarted, MessageCallback, MessageCreated
 from sqlalchemy import select
 
 from ..config import settings
-from ..db import BotState, CheckSession, ShiftCheck, Task, User, Venue, db_session, utcnow
+from ..db import BotState, CheckSession, ShiftCheck, ShiftItem, ShiftPhoto, Task, User, Venue, db_session, utcnow
 from ..engine import summary
 from ..rulebook import get_rulebook
 from ..services import sessions as svc
@@ -187,9 +187,9 @@ async def show_status(chat_id: int, user_id: int):
         today = _local_now().strftime("%Y-%m-%d")
         sc = db.execute(select(ShiftCheck).where(ShiftCheck.venue_id == venue.id, ShiftCheck.date == today)).scalars().first()
         if sc:
-            rule_items = {k: v for k, v in sc.items.items() if not k.startswith("_")}
-            done = sum(1 for v in rule_items.values() if v.get("status") == "ok")
-            lines.append(f"Чек-лист смены на сегодня: {done} из {len(rule_items)}.")
+            items = db.execute(select(ShiftItem).where(ShiftItem.shift_check_id == sc.id)).scalars().all()
+            done = sum(1 for it in items if it.status == "ok")
+            lines.append(f"Чек-лист смены на сегодня: {done} из {len(items)}.")
         else:
             lines.append("Чек-лист смены на сегодня не заполнен.")
         markup = kb.status_kb(bool(open_s), open_s.id if open_s else None, len(tasks))
@@ -231,45 +231,66 @@ def _short(title: str, n: int = 44) -> str:
     return title if len(title) <= n else title[: n - 1] + "…"
 
 
+def _get_or_create_shift(db, venue: Venue, user_id: int, rules: list) -> ShiftCheck:
+    """Сегодняшний чек-лист смены; создаёт по одной строке ShiftItem на каждое применимое требование.
+
+    Если справочник изменился (появилось новое требование), недостающие строки досоздаются —
+    но уже отмеченные пункты не трогаются.
+    """
+    today = _local_now().strftime("%Y-%m-%d")
+    sc = db.execute(select(ShiftCheck).where(ShiftCheck.venue_id == venue.id, ShiftCheck.date == today)).scalars().first()
+    if sc is None:
+        sc = ShiftCheck(venue_id=venue.id, user_id=user_id, date=today)
+        db.add(sc)
+        db.flush()
+    existing = {it.rule_id for it in db.execute(select(ShiftItem).where(ShiftItem.shift_check_id == sc.id)).scalars().all()}
+    for r in rules:
+        if r.id not in existing:
+            db.add(ShiftItem(shift_check_id=sc.id, rule_id=r.id, status=None))
+    db.flush()
+    return sc
+
+
 async def show_shift(chat_id: int, user_id: int):
     with db_session() as db:
         venue = svc.current_venue(db, user_id)
         if venue is None:
             await start_onboarding(chat_id, user_id)
             return
-        today = _local_now().strftime("%Y-%m-%d")
-        sc = db.execute(select(ShiftCheck).where(ShiftCheck.venue_id == venue.id, ShiftCheck.date == today)).scalars().first()
         rules = _shift_rules(venue)
-        if sc is None:
-            sc = ShiftCheck(venue_id=venue.id, user_id=user_id, date=today, items={r.id: {"status": None} for r in rules})
-            db.add(sc)
-            db.flush()
-        items = [(r.id, _short(r.title), (sc.items.get(r.id) or {}).get("status") == "ok") for r in rules]
+        sc = _get_or_create_shift(db, venue, user_id, rules)
+        by_rule = {it.rule_id: it for it in db.execute(select(ShiftItem).where(ShiftItem.shift_check_id == sc.id)).scalars().all()}
+        rows = [(r.id, _short(r.title), (by_rule.get(r.id).status if r.id in by_rule else None) == "ok") for r in rules]
         check_id = sc.id
         d = _local_now().strftime("%d.%m")
     await _send(
         chat_id,
-        f"Чек-лист смены {d} — {len(items)} пунктов. Отмечайте по мере проверки; фото журнала можно прислать ответом.",
-        attachments=[kb.shift_kb(check_id, items)],
+        f"Чек-лист смены {d} — {len(rows)} пунктов. Отмечайте по мере проверки; фото журнала можно прислать ответом.",
+        attachments=[kb.shift_kb(check_id, rows)],
     )
 
 
 async def _toggle_shift(cb: MessageCallback, check_id: int, rule_id: str):
+    """Отмечает ровно один пункт: чужой пункт, отмеченный почти одновременно, не может быть затёрт —
+    это разные строки ShiftItem, а не общий JSON-снимок."""
     with db_session() as db:
         sc = db.get(ShiftCheck, check_id)
         if sc is None:
             await cb.ack(notification="Чек-лист не найден")
             return
-        items = dict(sc.items)
-        cur = dict(items.get(rule_id) or {})
-        cur["status"] = None if cur.get("status") == "ok" else "ok"
-        cur["at"] = utcnow().isoformat()
-        items[rule_id] = cur
-        sc.items = items
+        item = db.execute(
+            select(ShiftItem).where(ShiftItem.shift_check_id == check_id, ShiftItem.rule_id == rule_id)
+        ).scalars().first()
+        if item is None:
+            item = ShiftItem(shift_check_id=check_id, rule_id=rule_id, status=None)
+            db.add(item)
+            db.flush()
+        item.status = None if item.status == "ok" else "ok"
         db.flush()
         venue = db.get(Venue, sc.venue_id)
         rules = _shift_rules(venue)
-        rows = [(r.id, _short(r.title), (items.get(r.id) or {}).get("status") == "ok") for r in rules]
+        by_rule = {it.rule_id: it.status for it in db.execute(select(ShiftItem).where(ShiftItem.shift_check_id == check_id)).scalars().all()}
+        rows = [(r.id, _short(r.title), by_rule.get(r.id) == "ok") for r in rules]
     await _replace(cb, cb.message.body.text, [kb.shift_kb(check_id, rows)], notification="Отмечено")
 
 
@@ -279,10 +300,10 @@ async def _finish_shift(cb: MessageCallback, check_id: int):
         if sc is None:
             await cb.ack(notification="Чек-лист не найден")
             return
-        rule_items = {k: v for k, v in sc.items.items() if not k.startswith("_")}
-        total = len(rule_items)
-        done = sum(1 for v in rule_items.values() if v.get("status") == "ok")
-        missing = [rid for rid, v in rule_items.items() if v.get("status") != "ok"]
+        items = db.execute(select(ShiftItem).where(ShiftItem.shift_check_id == check_id)).scalars().all()
+        total = len(items)
+        done = sum(1 for it in items if it.status == "ok")
+        missing = [it.rule_id for it in items if it.status != "ok"]
         rules = svc.rules_by_id()
     if missing:
         names = "\n".join(f"• {rules[r].title}" for r in missing if r in rules)
@@ -620,7 +641,10 @@ async def _close_task(chat_id: int, user_id: int, task_id: int, photo_rel: str |
 
 
 async def _attach_shift_photo(chat_id: int, user_id: int, url: str):
-    """Фото, присланное вне сценария, прикрепляем к сегодняшнему чек-листу смены как доказательство."""
+    """Фото, присланное вне сценария, прикрепляем к сегодняшнему чек-листу смены как доказательство.
+
+    Каждое фото — своя строка (ShiftPhoto): параллельная присылка нескольких фото не теряет ни одно.
+    """
     with db_session() as db:
         venue = svc.current_venue(db, user_id)
         if venue is None:
@@ -630,6 +654,7 @@ async def _attach_shift_photo(chat_id: int, user_id: int, url: str):
         if sc is None:
             await _send(chat_id, "Фото получил. Чтобы привязать его к смене, сначала откройте чек-лист: /shift")
             return
+        shift_check_id = sc.id
     try:
         rel = await download_from_max(url)
     except Exception as e:  # noqa: BLE001
@@ -637,13 +662,12 @@ async def _attach_shift_photo(chat_id: int, user_id: int, url: str):
         await _send(chat_id, "Не удалось сохранить фото, попробуйте ещё раз.")
         return
     with db_session() as db:
-        sc = db.execute(select(ShiftCheck).where(ShiftCheck.venue_id == venue.id, ShiftCheck.date == today)).scalars().first()
-        items = dict(sc.items)
-        photos = list(items.get("_photos", {}).get("list", []))
-        photos.append({"path": rel, "at": utcnow().isoformat()})
-        items["_photos"] = {"list": photos}
-        sc.items = items
-    await _send(chat_id, f"Фото сохранено к смене ({len(photos)} шт.).")
+        db.add(ShiftPhoto(shift_check_id=shift_check_id, photo_path=rel))
+        db.flush()
+        count = db.execute(
+            select(ShiftPhoto).where(ShiftPhoto.shift_check_id == shift_check_id)
+        ).scalars().all()
+    await _send(chat_id, f"Фото сохранено к смене ({len(count)} шт.).")
 
 
 async def _save_geo(chat_id: int, user_id: int, lat, lon):

@@ -5,8 +5,9 @@ from types import SimpleNamespace
 import pytest
 
 from app.bot import handlers as h
-from app.db import db_session, init_db
+from app.db import ShiftItem, db_session, init_db
 from app.services import sessions as svc
+from sqlalchemy import select
 
 UID = 777001
 CHAT = 555001
@@ -143,6 +144,57 @@ async def test_onboarding_to_result(fake):
     # Задач пока нет
     await h.on_message(msg("/tasks"))
     assert "нет" in fake.last()["text"].lower()
+
+
+@pytest.mark.asyncio
+async def test_shift_concurrent_taps_do_not_clobber(fake):
+    """Регрессия: два тапа по РАЗНЫМ пунктам чек-листа почти одновременно — раньше при хранении
+    отметок одним JSON-блобом второй commit писал весь снимок из своего (уже устаревшего) чтения
+    и затирал отметку первого пункта. Теперь каждый пункт — своя строка (ShiftItem).
+
+    Отдельный пользователь/чат — чтобы не подхватить чек-лист смены, уже частично отмеченный
+    другим тестом этого модуля (тот же venue/дата дали бы не пустой начальный чек-лист).
+    """
+    import asyncio
+
+    uid, chat = 777099, 555099
+    with db_session() as db:
+        svc.get_or_create_user(db, uid, "Тест2", chat_id=chat)
+        svc.save_venue(db, uid, {"activity": "cafe", "has_kitchen": True, "own_production": True,
+                                 "seats": 35, "staff": 10, "alcohol": False, "name": "Кафе 2"})
+
+    def msg2(text):
+        return SimpleNamespace(message=SimpleNamespace(
+            recipient=SimpleNamespace(chat_id=chat, user_id=None),
+            sender=SimpleNamespace(user_id=uid, first_name="Тест2", last_name="", username=None),
+            body=SimpleNamespace(text=text, attachments=[], mid="mX"),
+        ))
+
+    def press2(payload):
+        cb = FakeCallback(payload)
+        cb.callback.user = SimpleNamespace(user_id=uid, first_name="Тест2", last_name="", username=None)
+        cb.message.recipient = SimpleNamespace(chat_id=chat)
+        return cb
+
+    await h.on_message(msg2("/shift"))
+    sh_btns = [b for b in fake.buttons(fake.last()) if getattr(b, "payload", "").startswith("sh|")]
+    assert len(sh_btns) >= 2
+    p1, p2 = sh_btns[0].payload, sh_btns[1].payload
+    initial = {getattr(b, "payload", "").split("|")[2]: getattr(b, "text", "").startswith("✅") for b in sh_btns[:2]}
+    assert not any(initial.values()), "тест ожидает чистый чек-лист — оба пункта изначально не отмечены"
+
+    # Оба обработчика стартуют без ожидания друг друга — как если бы оба callback пришли почти одновременно.
+    cb1, cb2 = press2(p1), press2(p2)
+    await asyncio.gather(h.on_callback(cb1), h.on_callback(cb2))
+
+    check_id = int(p1.split("|")[1])
+    with db_session() as db:
+        items = {it.rule_id: it.status for it in db.execute(
+            select(ShiftItem).where(ShiftItem.shift_check_id == check_id)
+        ).scalars().all()}
+    rule1, rule2 = p1.split("|")[2], p2.split("|")[2]
+    assert items[rule1] == "ok", "отметка первого пункта потеряна"
+    assert items[rule2] == "ok", "отметка второго пункта потеряна"
 
 
 @pytest.mark.asyncio

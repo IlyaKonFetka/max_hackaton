@@ -19,6 +19,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     create_engine,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
@@ -131,16 +132,51 @@ class Task(Base):
 
 
 class ShiftCheck(Base):
-    """Короткий чек-лист смены по требованиям с периодичностью shift — живёт в боте."""
+    """Короткий чек-лист смены по требованиям с периодичностью shift — живёт в боте.
+
+    Пункты хранятся отдельной таблицей (ShiftItem), а не одним JSON-полем: тогда отметка
+    одного пункта — это запись в одну строку и не может затереть отметку другого пункта,
+    сделанную почти одновременно (при read-modify-write общего блоба второй commit
+    переписывал весь снимок, включая ещё не увиденное им чужое изменение).
+    """
 
     __tablename__ = "shift_checks"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     venue_id: Mapped[int] = mapped_column(ForeignKey("venues.id"), index=True)
     user_id: Mapped[int] = mapped_column(Integer, index=True)
     date: Mapped[str] = mapped_column(String(10), index=True)  # YYYY-MM-DD локальная дата
-    items: Mapped[dict] = mapped_column(JSON, default=dict)  # rule_id -> {status, photo_path, at}
-    message_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    items: Mapped[list["ShiftItem"]] = relationship(back_populates="check", cascade="all, delete-orphan")
+    photos: Mapped[list["ShiftPhoto"]] = relationship(back_populates="check", cascade="all, delete-orphan")
+
+
+class ShiftItem(Base):
+    """Один пункт чек-листа смены. Уникален по (check, rule) — отметка обновляет ровно эту строку."""
+
+    __tablename__ = "shift_items"
+    __table_args__ = (UniqueConstraint("shift_check_id", "rule_id", name="uq_shift_item"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    shift_check_id: Mapped[int] = mapped_column(ForeignKey("shift_checks.id"), index=True)
+    rule_id: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str | None] = mapped_column(String(16), nullable=True)  # None | "ok"
+    photo_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    check: Mapped[ShiftCheck] = relationship(back_populates="items")
+
+
+class ShiftPhoto(Base):
+    """Фото, присланное к смене вне конкретного пункта (например, снимок журнала одним кадром)."""
+
+    __tablename__ = "shift_photos"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    shift_check_id: Mapped[int] = mapped_column(ForeignKey("shift_checks.id"), index=True)
+    photo_path: Mapped[str] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    check: Mapped[ShiftCheck] = relationship(back_populates="photos")
 
 
 engine = create_engine(settings.db_url, future=True, connect_args={"check_same_thread": False} if settings.db_url.startswith("sqlite") else {})
