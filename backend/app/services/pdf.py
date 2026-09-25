@@ -62,7 +62,9 @@ def build_act(session: CheckSession, venue: Venue, owner_name: str) -> Path:
 
     story.append(Paragraph("Акт самопроверки соблюдения обязательных требований", h1))
     story.append(Paragraph(
-        f"Объект: <b>{_esc(venue.name)}</b>" + (f", {_esc(venue.region)}" if venue.region else ""), base))
+        f"Объект: <b>{_esc(venue.name)}</b>" + (f", {_esc(venue.region)}" if venue.region else "")
+        + (f" · координаты {venue.lat:.5f}, {venue.lon:.5f}" if venue.lat is not None and venue.lon is not None else ""),
+        base))
     story.append(Paragraph(
         f"Дата самопроверки: {local_date(session.finished_at or session.started_at, tz)} · "
         f"Проводил: {_esc(owner_name)} · Версия справочника: {session.rules_version}", small))

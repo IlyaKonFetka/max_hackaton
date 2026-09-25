@@ -1,4 +1,4 @@
-/** Клиент API бэкенда. Авторизация — подписанный initData из Bridge в заголовке. */
+/** Клиент API. Авторизация: initData из MAX Bridge в заголовке X-Max-Init-Data, бэкенд сверяет подпись. */
 
 import { apiUrl, initData } from './bridge'
 

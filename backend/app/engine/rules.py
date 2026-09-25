@@ -40,6 +40,7 @@ class Field:
     options: tuple[Option, ...] = ()
     optional: bool = False
     skip_label: str | None = None
+    location: bool = False  # под вопросом кнопка «Отправить точку на карте»
     value_labels: dict[str, str] = field(default_factory=dict)
 
     def label_for(self, value: Any) -> str:
@@ -127,6 +128,7 @@ def _parse_fields(raw: dict) -> tuple[Field, ...]:
                 options=tuple(Option(o["value"], o["label"]) for o in f.get("options", [])),
                 optional=bool(f.get("optional", False)),
                 skip_label=f.get("skip_label"),
+                location=bool(f.get("location", False)),
                 value_labels={str(k): v for k, v in (f.get("value_labels") or {}).items()},
             )
         )

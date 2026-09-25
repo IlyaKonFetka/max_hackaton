@@ -1,7 +1,7 @@
 """Сценарий бота: онбординг-профиль, результат расчёта, статус, задачи, чек-лист смены.
 
 Состояние диалога хранится в БД (BotState), поэтому перезапуск процесса не роняет сценарий.
-Все callback'и идут в один диспетчер по префиксу payload — меньше магии, легче отлаживать.
+Все callback'и разбирает on_callback по префиксу payload («ans|…», «shq|…»): так весь маршрут виден в одном месте.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from ..db import BotState, CheckSession, Membership, ShiftCheck, ShiftItem, Shif
 from ..engine import summary
 from ..rulebook import get_rulebook
 from ..services import sessions as svc
+from ..services.geocode import region_by_point
 from ..services.media import download_from_max
 from . import keyboards as kb
 from . import texts
@@ -105,8 +106,8 @@ async def _ask(chat_id: int, field_key: str):
         await _send(chat_id, field.question, attachments=[kb.question_kb(field)])
 
 
-async def _advance(chat_id: int, user_id: int, field_key: str, value):
-    """Сохраняет ответ и задаёт следующий вопрос или показывает сводку профиля."""
+async def _advance(chat_id: int, user_id: int, field_key: str, value, extra: dict | None = None):
+    """Сохраняет ответ (и служебные поля вроде координат) и задаёт следующий вопрос или показывает сводку."""
     fields = _fields()
     keys = [f.key for f in fields]
     idx = keys.index(field_key)
@@ -115,6 +116,7 @@ async def _advance(chat_id: int, user_id: int, field_key: str, value):
         data = dict(st.data or {})
         profile = dict(data.get("profile") or {})
         profile[field_key] = value
+        profile.update(extra or {})
         data["profile"] = profile
         if idx + 1 < len(fields):
             _set_state(db, user_id, f"onb:{keys[idx + 1]}", data)
@@ -127,6 +129,17 @@ async def _advance(chat_id: int, user_id: int, field_key: str, value):
         await _ask(chat_id, next_key)
     else:
         await _show_profile_summary(chat_id, profile)
+
+
+async def _region_from_location(chat_id: int, user_id: int, key: str, loc):
+    lat, lon = getattr(loc, "latitude", None), getattr(loc, "longitude", None)
+    if lat is None or lon is None:
+        await _ask(chat_id, key)
+        return
+    region = await region_by_point(lat, lon)
+    shown = region or f"{lat:.4f}, {lon:.4f}"
+    await _send(chat_id, f"Регион по точке на карте: {shown}." + ("" if region else " Название определить не удалось, сохраню координаты."))
+    await _advance(chat_id, user_id, key, shown, extra={"lat": float(lat), "lon": float(lon)})
 
 
 async def _show_profile_summary(chat_id: int, profile: dict):
@@ -226,7 +239,7 @@ async def _show_task_for_assignee(chat_id: int, task: Task):
     await _send(
         chat_id,
         f"Вам назначена задача:\n{task.title}\nСрок: {_fmt_date(task.due_date)}\n\n"
-        "Когда сделаете — нажмите кнопку и пришлите фото результата: оно попадёт в акт.",
+        "Когда сделаете, нажмите кнопку и пришлите фото результата. Оно попадёт в акт.",
         attachments=[kb.staff_task_kb(task.id)],
     )
 
@@ -237,12 +250,12 @@ async def show_staff_home(chat_id: int, user_id: int, venue: Venue):
         n = len(tasks)
         nearest = tasks[0] if tasks else None
         due = _fmt_date(nearest.due_date) if nearest else ""
-    lines = [f"{venue.name} — вы сотрудник."]
+    lines = [f"{venue.name}. Вы здесь сотрудник."]
     if n:
         lines.append(f"Открытых задач: {n}. Ближайший срок: {due} — {nearest.title}")
     else:
         lines.append("Открытых задач нет.")
-    lines.append("Чек-лист смены — по одному пункту, фото засчитывается как «выполнено».")
+    lines.append("Чек-лист смены идёт по одному пункту. Фото вместо ответа засчитывается как «выполнено».")
     await _send(chat_id, "\n".join(lines), attachments=[kb.staff_home_kb(n)])
 
 
@@ -303,7 +316,7 @@ async def _invite_from_contact(chat_id: int, user_id: int, attachment):
             await _send(chat_id, texts.OWNER_ONLY)
             return
         if max_uid and max_uid == user_id:
-            await _send(chat_id, "Это ваш собственный контакт — выберите сотрудника.")
+            await _send(chat_id, "Это ваш собственный контакт. Выберите сотрудника.")
             return
         m = svc.invite_staff(db, venue, user_id, name, phone, max_uid)
         mid, venue_name = m.id, venue.name
@@ -323,7 +336,7 @@ async def _invite_from_contact(chat_id: int, user_id: int, attachment):
             pass
     share_url = f"https://max.ru/:share?text={quote(invite, safe='')}"
     profile_url = f"https://max.ru/{username}" if username else None
-    await _send(chat_id, f"{name or 'Сотрудник'} записан. Нажмите кнопку — откроется отправка в MAX с готовым приглашением.",
+    await _send(chat_id, f"{name or 'Сотрудник'} записан. По кнопке откроется отправка в MAX с готовым приглашением.",
                 attachments=[kb.assign_result_kb(share_url, profile_url)])
 
 
@@ -341,14 +354,14 @@ async def _join_team(chat_id: int, user_id: int, raw_id: str):
             await _send(chat_id, "Приглашение не найдено.")
             return
         if venue.owner_id == user_id:
-            await _send(chat_id, "Это ссылка для сотрудника — перешлите её ему.")
+            await _send(chat_id, "Это ссылка для сотрудника, перешлите её ему.")
             return
         if m.user_id and m.user_id != user_id:
             await _send(chat_id, "Это приглашение для другого человека.")
             return
         if not m.user_id and m.phone:
             _set_state(db, user_id, f"join:{mid}", {})
-            await _send(chat_id, f"Приглашение в «{venue.name}» выписано на номер ···{m.phone[-4:]}. Подтвердите — отправьте свой контакт.",
+            await _send(chat_id, f"Приглашение в «{venue.name}» выписано на номер ···{m.phone[-4:]}. Чтобы подтвердить, что это вы, отправьте свой контакт.",
                         attachments=[kb.claim_kb()])
             return
         u = db.get(User, user_id)
@@ -463,7 +476,7 @@ async def show_shift(chat_id: int, user_id: int):
     with db_session() as db:
         _set_state(db, user_id, f"shift:{check_id}", {"skipped": []})
     if answered == 0:
-        await _send(chat_id, f"Чек-лист смены {d} — {total} пунктов. По одному: нажмите кнопку или пришлите фото вместо неё.")
+        await _send(chat_id, f"Чек-лист смены на {d}, пунктов: {total}. Буду присылать по одному. Отвечайте кнопкой или пришлите фото.")
     else:
         await _send(chat_id, f"Продолжаем чек-лист смены {d}: отмечено {answered} из {total}.")
     await _ask_shift_item(chat_id, user_id, check_id)
@@ -555,7 +568,7 @@ async def _shift_photo_answer(chat_id: int, user_id: int, check_id: int, url: st
             item.photo_path = rel
             db.flush()
     rule = svc.rules_by_id().get(rid)
-    await _send(chat_id, f"Фото принято: «{rule.title if rule else rid}» — ✅ выполнено.")
+    await _send(chat_id, f"Фото принял. «{rule.title if rule else rid}» отмечено как выполнено.")
     await _ask_shift_item(chat_id, user_id, check_id)
 
 
@@ -580,7 +593,7 @@ async def _shift_summary(chat_id: int, user_id: int, check_id: int, cb: MessageC
     if left:
         lines.append("\nНе отмечено:\n" + "\n".join(f"• {t}" for t in left))
     if no or left:
-        lines.append("\nЭти пункты стоит закрыть до конца смены — они попадут в следующую самопроверку как требующие внимания.")
+        lines.append("\nИх стоит закрыть до конца смены.")
     else:
         lines.append("Все пункты закрыты. Хорошего дня.")
     text = "\n".join(lines)
@@ -642,7 +655,7 @@ async def _claim_task(chat_id: int, user_id: int, raw_id: str):
             await _send(chat_id, "Эта задача уже закрыта или не найдена.")
             return
         if task.owner_id == user_id:
-            await _send(chat_id, "Это ссылка для сотрудника — у вас задача и так есть в /tasks. Перешлите ссылку ему.")
+            await _send(chat_id, "Это ссылка для сотрудника. У вас эта задача уже есть в /tasks, перешлите ссылку ему.")
             return
         # Назначен конкретный аккаунт MAX — принять может только он.
         if task.assignee_user_id and task.assignee_user_id != user_id:
@@ -654,7 +667,7 @@ async def _claim_task(chat_id: int, user_id: int, raw_id: str):
             await _send(
                 chat_id,
                 f"Задача «{task.title}» назначена на номер ···{_norm_phone(task.assignee_phone)[-4:]}. "
-                "Подтвердите, что это вы — отправьте свой контакт.",
+                "Чтобы подтвердить, что это вы, отправьте свой контакт.",
                 attachments=[kb.claim_kb()],
             )
             return
@@ -700,7 +713,7 @@ async def _claim_with_contact(chat_id: int, user_id: int, task_id: int, attachme
             return
         own_contact = contact_uid is None or contact_uid == user_id
         if not own_contact or _norm_phone(phone) != _norm_phone(task.assignee_phone):
-            await _send(chat_id, "Номер не совпадает с назначенным. Если это ошибка — попросите владельца переназначить задачу.")
+            await _send(chat_id, "Номер не совпадает с назначенным. Если это ошибка, попросите владельца переназначить задачу.")
             return
         _do_claim(db, task, user_id)
         owner = db.get(User, task.owner_id)
@@ -751,7 +764,7 @@ async def on_message(event: MessageCreated):
             await _send(chat_id, texts.HELP)
         return
 
-    # Вложения: контакт (назначение), фото (закрытие задачи / чек-лист), геолокация
+    # Вложения: контакт (назначение, приглашение, подтверждение номера) и фото (задача, чек-лист смены)
     for a in attachments:
         atype = str(getattr(a, "type", ""))
         if atype.endswith("contact") and state.startswith("assign:"):
@@ -777,8 +790,13 @@ async def on_message(event: MessageCreated):
             if url:
                 await _attach_shift_photo(chat_id, user_id, url)
                 return
-        if atype.endswith("location"):
-            await _save_geo(chat_id, user_id, getattr(a, "latitude", None), getattr(a, "longitude", None))
+
+    # Точка на карте в ответ на вопрос о регионе
+    if state.startswith("onb:"):
+        loc = next((a for a in attachments if str(getattr(a, "type", "")).endswith("location")), None)
+        key = state.split(":", 1)[1]
+        if loc is not None and key != "confirm" and get_rulebook().field(key).location:
+            await _region_from_location(chat_id, user_id, key, loc)
             return
 
     # Текстовые вопросы онбординга
@@ -804,13 +822,13 @@ async def on_message(event: MessageCreated):
         await _send(chat_id, "Выберите контакт сотрудника или нажмите «Отмена».", attachments=[kb.invite_kb()])
         return
     if state.startswith("claim:") or state.startswith("join:"):
-        await _send(chat_id, "Подтвердите номер — отправьте свой контакт кнопкой.", attachments=[kb.claim_kb()])
+        await _send(chat_id, "Отправьте свой контакт кнопкой ниже, чтобы подтвердить номер.", attachments=[kb.claim_kb()])
         return
     if state.startswith("done:"):
         await _send(chat_id, "Пришлите фото результата или закройте без фото.", attachments=[kb.done_kb(int(state.split(':')[1]))])
         return
     if state.startswith("shift:"):
-        await _send(chat_id, "Ответьте кнопкой под пунктом или пришлите фото — оно засчитается как «выполнено».")
+        await _send(chat_id, "Ответьте кнопкой под пунктом или пришлите фото, оно засчитается как «выполнено».")
         return
 
     await _send(chat_id, "Не понял. " + texts.HELP)
@@ -883,12 +901,12 @@ async def on_callback(cb: MessageCallback):
             with db_session() as db:
                 _set_state(db, user_id, f"assign:{parts[1]}", {})
             await cb.ack(notification="Кого назначить?")
-            await _send(chat_id, "Отправьте контакт сотрудника — я запишу его ответственным и дам ссылку, по которой он получит задачу в MAX.", attachments=[kb.assign_kb()])
+            await _send(chat_id, "Отправьте контакт сотрудника. Я запишу его ответственным и подготовлю приглашение.", attachments=[kb.assign_kb()])
         elif head == "done":
             with db_session() as db:
                 _set_state(db, user_id, f"done:{parts[1]}", {})
             await cb.ack(notification="Пришлите фото")
-            await _send(chat_id, "Пришлите фото «как стало» — оно попадёт в акт. Или закройте без фото.", attachments=[kb.done_kb(int(parts[1]))])
+            await _send(chat_id, "Пришлите фото «как стало», оно попадёт в акт. Можно закрыть и без фото.", attachments=[kb.done_kb(int(parts[1]))])
         elif head == "done_nophoto":
             await cb.ack(notification="Закрываю")
             await _close_task(chat_id, user_id, int(parts[1]), None)
@@ -896,10 +914,6 @@ async def on_callback(cb: MessageCallback):
             with db_session() as db:
                 _set_state(db, user_id, "idle", {})
             await cb.ack(notification="Отменено")
-        elif head == "geo":
-            with db_session() as db:
-                _set_state(db, user_id, "idle", {})
-            await cb.ack(notification="Пропущено")
         elif head == "shift":
             await cb.ack(notification="Чек-лист")
             await show_shift(chat_id, user_id)
@@ -917,7 +931,7 @@ async def on_callback(cb: MessageCallback):
             await cb.ack(notification="Что-то пошло не так, попробуйте ещё раз")
         except Exception:  # noqa: BLE001
             pass
-        await _send(chat_id, "Произошла ошибка, но всё сохранено. Наберите /status, чтобы продолжить.")
+        await _send(chat_id, "Не получилось обработать нажатие. Наберите /status и попробуйте ещё раз.")
 
 
 # ---------- действия ----------
@@ -1046,7 +1060,7 @@ async def _assign_from_contact(chat_id: int, user_id: int, task_id: int, attachm
     profile_url = f"https://max.ru/{username}" if username else None
     await _send(
         chat_id,
-        f"Ответственный: {who}.\nНажмите кнопку — откроется отправка в MAX с готовым текстом, выберите сотрудника. "
+        f"Ответственный: {who}.\nПо кнопке откроется отправка в MAX с готовым текстом, останется выбрать сотрудника. "
         "Открыть задачу по ссылке сможет только он.",
         attachments=[kb.assign_result_kb(share_url, profile_url)],
     )
@@ -1106,13 +1120,3 @@ async def _attach_shift_photo(chat_id: int, user_id: int, url: str):
             select(ShiftPhoto).where(ShiftPhoto.shift_check_id == shift_check_id)
         ).scalars().all()
     await _send(chat_id, f"Фото сохранено к смене ({len(count)} шт.).")
-
-
-async def _save_geo(chat_id: int, user_id: int, lat, lon):
-    with db_session() as db:
-        venue = svc.current_venue(db, user_id)
-        if venue is None or lat is None:
-            return
-        venue.lat, venue.lon = float(lat), float(lon)
-        _set_state(db, user_id, "idle", {})
-    await _send(chat_id, "Геолокация заведения сохранена — она попадёт в акт.")

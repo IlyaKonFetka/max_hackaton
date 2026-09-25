@@ -70,10 +70,11 @@ fields:
 
   - key: region
     label: "Регион"
-    question: "В каком регионе заведение? Напишите текстом или пропустите."
+    question: "В каком регионе заведение? Отправьте точку на карте, напишите регион текстом или пропустите."
     type: text
     optional: true
     skip_label: "Пропустить"
+    location: true
 
   - key: name
     label: "Название"

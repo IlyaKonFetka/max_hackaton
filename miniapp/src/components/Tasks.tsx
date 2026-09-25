@@ -55,7 +55,7 @@ export function Tasks() {
   return (
     <>
       <p className="subtitle" style={{ margin: '10px 4px 0' }}>
-        Каждое нарушение — задача со сроком из справочника. Назначить ответственного можно в боте: /tasks.
+        Каждое нарушение превращается в задачу, срок берётся из справочника. Ответственного назначают в боте, команда /tasks.
       </p>
       <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onFile} />
       {tasks.map((t) => {

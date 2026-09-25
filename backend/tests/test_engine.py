@@ -78,3 +78,15 @@ def test_unconditional_rule():
     class B:  # минимальный rulebook
         fields = ()
     assert evaluate(r, {}, B()).applicable
+
+
+def test_testdata_profiles_match_engine(book):
+    """testdata/profiles.json — демо-профили из README и DATA-API; цифры в документации должны совпадать с движком."""
+    import json
+
+    data = json.loads((RULES_DIR.parent / "testdata" / "profiles.json").read_text(encoding="utf-8"))
+    assert data["total_rules"] == len(book.rules)
+    for p in data["profiles"]:
+        s = summary(p["profile"], book)
+        assert s["applicable"] == p["expected"]["applicable"], p["id"]
+        assert s["by_agency"] == p["expected"]["by_agency"], p["id"]

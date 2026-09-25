@@ -1,4 +1,4 @@
-"""Клавиатуры бота. Payload callback'ов: 'prefix|arg1|arg2' — разбирается в handlers.dispatch_callback."""
+"""Клавиатуры бота. Payload callback'ов: «префикс|арг1|арг2», разбирается в handlers.on_callback."""
 
 from __future__ import annotations
 
@@ -52,10 +52,13 @@ def question_kb(field: Field):
 
 
 def text_question_kb(field: Field):
-    if not (field.optional and field.skip_label):
+    if not (field.location or (field.optional and field.skip_label)):
         return None
     kb = InlineKeyboardBuilder()
-    kb.row(CallbackButton(text=field.skip_label, payload=f"skip|{field.key}"))
+    if field.location:
+        kb.row(RequestGeoLocationButton(text="Отправить точку на карте"))
+    if field.optional and field.skip_label:
+        kb.row(CallbackButton(text=field.skip_label, payload=f"skip|{field.key}"))
     return kb.as_markup()
 
 
@@ -148,13 +151,6 @@ def done_kb(task_id: int):
     kb = InlineKeyboardBuilder()
     kb.row(CallbackButton(text="Закрыть без фото", payload=f"done_nophoto|{task_id}"))
     kb.row(CallbackButton(text="Отмена", payload="cancel"))
-    return kb.as_markup()
-
-
-def geo_kb():
-    kb = InlineKeyboardBuilder()
-    kb.row(RequestGeoLocationButton(text="Отправить геолокацию заведения"))
-    kb.row(CallbackButton(text="Пропустить", payload="geo|skip"))
     return kb.as_markup()
 
 

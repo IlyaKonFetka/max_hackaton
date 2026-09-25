@@ -123,12 +123,13 @@ def save_venue(db: Session, user_id: int, profile: dict) -> Venue:
     v = current_venue(db, user_id)
     name = str(profile.get("name") or "Моё заведение")
     region = str(profile.get("region") or "")
-    clean = {k: val for k, val in profile.items() if k not in ("name", "region")}
+    clean = {k: val for k, val in profile.items() if k not in ("name", "region", "lat", "lon")}
     if v is None:
         v = Venue(owner_id=user_id, name=name, profile=clean, region=region)
         db.add(v)
     else:
         v.name, v.profile, v.region = name, clean, region
+    v.lat, v.lon = profile.get("lat"), profile.get("lon")
     db.flush()
     ensure_owner_membership(db, v)
     return v
@@ -218,7 +219,7 @@ def finish_session(db: Session, session: CheckSession, owner_id: int) -> list[Ta
         if rule is None:
             continue
         due = utcnow() + timedelta(days=rule.fix_days)
-        # Срок — до конца дня (локальное время учитывается при показе).
+        # 15:00 UTC = 18:00 по Москве: напоминание о сроке приходит в рабочее время, а не ночью.
         due = due.replace(hour=15, minute=0, second=0, microsecond=0)
         t = Task(
             session_id=session.id,

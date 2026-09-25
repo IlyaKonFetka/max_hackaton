@@ -38,7 +38,7 @@ export default function App() {
     } catch (e) {
       const err = e as ApiError
       if (err.status === 404) setScreen({ kind: 'error', message: err.message, noVenue: true })
-      else if (err.status === 401) setScreen({ kind: 'error', message: 'Откройте приложение из чата с ботом — нужны данные авторизации MAX.' })
+      else if (err.status === 401) setScreen({ kind: 'error', message: 'Откройте приложение кнопкой в чате с ботом: без этого MAX не передаёт данные для входа.' })
       else setScreen({ kind: 'error', message: err.message || 'Не удалось связаться с сервером' })
     }
   }, [])
@@ -106,10 +106,10 @@ export default function App() {
         <h2 className="title">{screen.noVenue ? 'Сначала профиль' : 'Не получилось'}</h2>
         <p>
           {screen.noVenue
-            ? 'Профиль заведения ещё не заполнен. Вернитесь в чат с ботом и ответьте на 7 вопросов — после этого здесь появится ваш список требований.'
+            ? 'Профиль заведения ещё не заполнен. Вернитесь в чат с ботом и ответьте на вопросы о заведении, тогда здесь появится ваш список требований.'
             : screen.message}
         </p>
-        {!insideMax() && <p className="err">Приложение открыто вне MAX — данных авторизации нет.</p>}
+        {!insideMax() && <p className="err">Приложение открыто вне MAX, войти не получится.</p>}
         <Button onClick={() => void load()}>Повторить</Button>
       </div>
     )
@@ -174,7 +174,7 @@ function CheckScreen({ session, readOnly, tab, setTab, finishing, onFinish, onNe
   }, [session.applicable])
 
   useEffect(() => {
-    // Пока есть неотмеченные пункты — просим подтвердить закрытие окна.
+    // Случайно смахнуть окно на середине списка обидно: при неотмеченных пунктах MAX переспросит.
     const wa = webApp()
     if (!wa) return
     if (!readOnly && p.answered > 0 && p.remaining > 0) wa.enableClosingConfirmation?.()
@@ -256,7 +256,7 @@ function Finished({ session, result, onNew, onTasks }: { session: SessionPayload
       <div className="card" style={{ marginTop: 12 }}>
         <p className="card-title">{result.act_sent_to_chat ? 'Акт отправлен в чат с ботом' : 'Акт сформирован'}</p>
         <p className="details" style={{ marginTop: 4 }}>
-          PDF с профилем объекта, перечнем требований со ссылками на НПА, статусами и фото. Его можно переслать бухгалтеру или показать инспектору на профилактическом визите.
+          В PDF профиль объекта, требования с реквизитами НПА, статусы и фото. Его можно переслать бухгалтеру или показать инспектору на профилактическом визите.
         </p>
       </div>
       {result.tasks.length > 0 ? (
@@ -267,10 +267,10 @@ function Finished({ session, result, onNew, onTasks }: { session: SessionPayload
               <li key={t.id}>до {new Date(t.due_date).toLocaleDateString('ru-RU')} — {t.title}</li>
             ))}
           </ul>
-          <p className="details" style={{ marginTop: 6 }}>Бот напомнит о сроках. Назначить ответственного — в чате командой /tasks.</p>
+          <p className="details" style={{ marginTop: 6 }}>Бот напомнит о сроках. Назначить ответственного можно в чате, команда /tasks.</p>
         </div>
       ) : (
-        <div className="card"><p className="card-title">Нарушений нет — план устранения не нужен.</p></div>
+        <div className="card"><p className="card-title">Нарушений нет, план устранения не нужен.</p></div>
       )}
       <div className="bottom">
         <div className="bottom-inner">

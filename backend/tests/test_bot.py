@@ -101,7 +101,7 @@ async def test_onboarding_to_result(fake):
         assert any(b.payload.startswith(f"ans|{key}|") for b in cur), f"ожидался вопрос {key}, а пришло: {fake.last()['text']}"
         await press(f"ans|{key}|{idx}")
     # Регион — текст можно пропустить кнопкой; название — текстом
-    assert any(b.payload == "skip|region" for b in fake.buttons(fake.last()))
+    assert any(getattr(b, "payload", None) == "skip|region" for b in fake.buttons(fake.last()))
     await press("skip|region")
     assert "называется" in fake.last()["text"]
     await h.on_message(msg("Пекарня на Баумана"))
@@ -214,7 +214,7 @@ async def test_shift_photo_answers_current_item(fake, monkeypatch):
 
     photo = SimpleNamespace(type="image", payload=SimpleNamespace(url="https://example/x.jpg"))
     await h.on_message(msg2("", [photo]))
-    assert any("Фото принято" in m["text"] for m in fake.sent[-2:])
+    assert any("Фото принял" in m["text"] for m in fake.sent[-2:])
     assert fake.last()["text"].startswith("2/")
     with db_session() as db:
         it = db.execute(select(ShiftItem).where(ShiftItem.shift_check_id == check_id, ShiftItem.rule_id == rule1)).scalars().first()
@@ -301,7 +301,7 @@ async def test_tasks_flow(fake):
     fake.sent.clear()
     stranger = SimpleNamespace(user_id=888, first_name="Иван", last_name="Повар", username=None)
     await h.on_bot_started(SimpleNamespace(user=stranger, chat_id=999, payload=f"task_{task_id}"))
-    assert "Подтвердите" in fake.last()["text"]
+    assert "подтвердить" in fake.last()["text"]
     # Прислал чужой номер — отказ
     wrong = SimpleNamespace(type="contact", payload=SimpleNamespace(
         vcf=SimpleNamespace(full_name="Иван", phone="+79991111111"), max_info=None))
@@ -376,7 +376,7 @@ async def test_team_roles(fake):
 
     # Сотрудник открывает ссылку: номер подтверждаем контактом; чужой номер — отказ, свой — в команде
     await h.on_bot_started(SimpleNamespace(user=staff, chat_id=staff_chat, payload=f"join_{mid}"))
-    assert "Подтвердите" in fake.last()["text"]
+    assert "подтвердить" in fake.last()["text"]
     wrong = SimpleNamespace(type="contact", payload=SimpleNamespace(vcf=SimpleNamespace(full_name="Иван", phone="+79991112233"), max_info=None))
     await h.on_message(m(staff, staff_chat, "", [wrong]))
     assert "не совпадает" in fake.last()["text"]
@@ -385,12 +385,12 @@ async def test_team_roles(fake):
     fake.sent.clear()
     await h.on_message(m(staff, staff_chat, "", [right]))
     assert any(x["chat_id"] == staff_chat and "в команде" in x["text"] for x in fake.sent)
-    assert any(x["chat_id"] == staff_chat and "вы сотрудник" in x["text"] for x in fake.sent)
+    assert any(x["chat_id"] == staff_chat and "Вы здесь сотрудник" in x["text"] for x in fake.sent)
     assert any(x["chat_id"] == owner_chat and "присоединился" in x["text"] for x in fake.sent)
 
     # /start сотрудника — его экран, не онбординг; /team владельца показывает его «в MAX»
     await h.on_message(m(staff, staff_chat, "/start"))
-    assert "вы сотрудник" in fake.last()["text"]
+    assert "Вы здесь сотрудник" in fake.last()["text"]
     await h.on_message(m(owner, owner_chat, "/team"))
     assert "Иван Повар" in fake.last()["text"] and "в MAX" in fake.last()["text"]
 
@@ -433,3 +433,47 @@ async def test_team_roles(fake):
     assert "Пришлите фото" in fake.last()["text"]
     await h.on_callback(cbk(staff, staff_chat, f"done_nophoto|{task_id}"))
     assert any(x["chat_id"] == owner_chat and "закрыл" in x["text"] for x in fake.sent[-3:])
+
+
+@pytest.mark.asyncio
+async def test_region_from_location(fake, monkeypatch):
+    """Вопрос о регионе принимает точку на карте: регион по Nominatim, координаты — в заведение и акт."""
+    from app.db import Venue
+
+    uid, chat = 777097, 555097
+    u = SimpleNamespace(user_id=uid, first_name="Гео", last_name="", username=None)
+
+    def m(text, attachments=None):
+        return SimpleNamespace(message=SimpleNamespace(recipient=SimpleNamespace(chat_id=chat, user_id=None), sender=u,
+                                                       body=SimpleNamespace(text=text, attachments=attachments or [], mid="m")))
+
+    async def region_ok(lat, lon):
+        return "Республика Татарстан"
+
+    monkeypatch.setattr(h, "region_by_point", region_ok)
+    with db_session() as db:
+        svc.get_or_create_user(db, uid, "Гео", chat_id=chat)
+        h._set_state(db, uid, "onb:region", {"profile": {"activity": "cafe", "has_kitchen": True, "own_production": False,
+                                                         "seats": 35, "staff": 3, "alcohol": False}})
+    await h._ask(chat, "region")
+    assert any("location" in str(getattr(b, "type", "")) for b in fake.buttons(fake.last()))
+
+    point = SimpleNamespace(type="location", latitude=55.7963, longitude=49.1088)
+    await h.on_message(m("", [point]))
+    assert any("Республика Татарстан" in x["text"] for x in fake.sent[-2:])
+    assert "называется" in fake.last()["text"]  # следующий вопрос — название
+    await h.on_message(m("Кафе на Кремлёвской"))
+    await h._confirm_profile(chat, uid)
+    with db_session() as db:
+        v = db.query(Venue).filter(Venue.owner_id == uid).one()
+        assert v.region == "Республика Татарстан" and round(v.lat, 4) == 55.7963 and "lat" not in v.profile
+
+    # Геокодер недоступен — регион сохраняется координатами
+    async def region_none(lat, lon):
+        return None
+
+    monkeypatch.setattr(h, "region_by_point", region_none)
+    with db_session() as db:
+        h._set_state(db, uid, "onb:region", {"profile": {}})
+    await h.on_message(m("", [point]))
+    assert any("55.7963, 49.1088" in x["text"] for x in fake.sent[-2:])

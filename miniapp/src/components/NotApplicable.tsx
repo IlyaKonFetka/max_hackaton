@@ -17,7 +17,7 @@ export function NotApplicable({ rules }: { rules: NotApplicableRule[] }) {
   return (
     <>
       <p className="subtitle" style={{ margin: '10px 4px 0' }}>
-        Эти пункты есть в проверочных листах, но к вашему профилю не относятся. Если профиль изменится — список пересчитается.
+        Эти пункты есть в проверочных листах, но к вашему профилю не относятся. Если заведение изменится, заполните профиль в боте заново (/profile), и список пересчитается.
       </p>
       {[...groups.entries()].map(([reason, items]) => (
         <div className="group" key={reason}>

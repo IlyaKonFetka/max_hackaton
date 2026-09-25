@@ -1,4 +1,4 @@
-/** Тонкая обёртка над MAX Bridge (window.WebApp). Вне MAX всё деградирует в no-op. */
+/** Обёртка над MAX Bridge (window.WebApp). В обычном браузере WebApp нет, поэтому вызовы молча ничего не делают. */
 
 export interface MaxWebApp {
   initData?: string
@@ -7,17 +7,11 @@ export interface MaxWebApp {
     start_param?: string
     auth_date?: number
   }
-  platform?: string
-  version?: string
-  openCodeReader?: (fileSelect?: boolean) => Promise<string>
-  requestContact?: () => Promise<{ phone: string }>
-  shareMaxContent?: (...args: unknown[]) => Promise<unknown>
   HapticFeedback?: {
     impactOccurred?: (style: string) => void
     notificationOccurred?: (type: 'success' | 'warning' | 'error') => void
     selectionChanged?: () => void
   }
-  BackButton?: { show?: () => void; hide?: () => void; onClick?: (cb: () => void) => void; offClick?: (cb: () => void) => void }
   enableClosingConfirmation?: () => void
   disableClosingConfirmation?: () => void
 }

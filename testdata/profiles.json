@@ -1,0 +1,93 @@
+{
+  "rules_version": "2026-09-20",
+  "total_rules": 52,
+  "profiles": [
+    {
+      "id": "cafe",
+      "title": "Кафе с кухней",
+      "note": "Основной демо-профиль",
+      "profile": {
+        "activity": "cafe",
+        "has_kitchen": true,
+        "own_production": true,
+        "seats": 35,
+        "staff": 10,
+        "alcohol": false
+      },
+      "expected": {
+        "applicable": 34,
+        "not_applicable": 18,
+        "by_agency": {
+          "Роспотребнадзор": 21,
+          "Роструд": 10,
+          "МЧС России": 3
+        }
+      }
+    },
+    {
+      "id": "coffee-to-go",
+      "title": "Кофе навынос",
+      "note": "Минимум требований: нет кухни, работников и мест",
+      "profile": {
+        "activity": "coffee",
+        "has_kitchen": false,
+        "own_production": false,
+        "seats": 0,
+        "staff": 0,
+        "alcohol": false
+      },
+      "expected": {
+        "applicable": 10,
+        "not_applicable": 42,
+        "by_agency": {
+          "Роспотребнадзор": 8,
+          "МЧС России": 2
+        }
+      }
+    },
+    {
+      "id": "canteen",
+      "title": "Столовая",
+      "note": "Бракераж и суточные пробы по СанПиН 4282-26 остаются только здесь",
+      "profile": {
+        "activity": "canteen",
+        "has_kitchen": true,
+        "own_production": true,
+        "seats": 80,
+        "staff": 10,
+        "alcohol": false
+      },
+      "expected": {
+        "applicable": 37,
+        "not_applicable": 15,
+        "by_agency": {
+          "Роспотребнадзор": 23,
+          "Роструд": 10,
+          "МЧС России": 4
+        }
+      }
+    },
+    {
+      "id": "shop",
+      "title": "Магазин у дома",
+      "note": "Второй отраслевой справочник, rules/retail.yaml",
+      "profile": {
+        "activity": "shop",
+        "has_kitchen": false,
+        "own_production": false,
+        "seats": 0,
+        "staff": 3,
+        "alcohol": true
+      },
+      "expected": {
+        "applicable": 27,
+        "not_applicable": 25,
+        "by_agency": {
+          "Роспотребнадзор": 15,
+          "Роструд": 9,
+          "МЧС России": 3
+        }
+      }
+    }
+  ]
+}
