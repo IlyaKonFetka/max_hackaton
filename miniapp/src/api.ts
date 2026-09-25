@@ -25,6 +25,7 @@ export interface Rule {
   evidence: 'check' | 'photo' | 'document'
   severity: 'high' | 'medium' | 'low'
   fix_days: number
+  section: string
 }
 
 export interface ApplicableRule extends Rule {
@@ -35,6 +36,27 @@ export interface ApplicableRule extends Rule {
 
 export interface NotApplicableRule extends Rule {
   reasons: string[]
+  /** Требование для другого вида деятельности (магазины у кафе): показываем одной строкой. */
+  other_domain: string
+}
+
+export interface ChecklistStatus {
+  id: string
+  agency: string
+  number: string
+  title: string
+  doc: string
+  status: 'yes' | 'maybe' | 'no' | 'other'
+  reason: string
+}
+
+export interface Funnel {
+  checklists_total: number
+  checklists_yes: number
+  checklists_maybe: number
+  agencies: { agency: string; label: string; total: number; yes: number; maybe: number; other: number }[]
+  detailed: { id: string; title: string; doc: string; questions: number; applicable: number; not_applicable: number; other_domain: number; other_scopes: string[] }[]
+  rules_applicable: number
 }
 
 export interface Progress {
@@ -56,6 +78,10 @@ export interface SessionPayload {
   applicable: ApplicableRule[]
   not_applicable: NotApplicableRule[]
   agencies: { key: string; label: string }[]
+  funnel: Funnel
+  checklists: ChecklistStatus[]
+  /** На сервере подключён помощник на языковой модели. */
+  assistant: boolean
 }
 
 export interface Task {
@@ -136,6 +162,12 @@ export const api = {
   },
   finish: (sessionId: number) => request<FinishResult>(`/api/session/${sessionId}/finish`, { method: 'POST' }),
   tasks: () => request<{ tasks: Task[] }>('/api/tasks'),
+  ask: (question: string, ruleId?: string) =>
+    request<{ answer: string; disclaimer: string; remaining: number }>('/api/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question, rule_id: ruleId }),
+    }),
   taskDone: (taskId: number, file?: File) => {
     const fd = new FormData()
     if (file) fd.append('file', file, file.name || 'photo.jpg')

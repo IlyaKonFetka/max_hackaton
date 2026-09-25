@@ -16,6 +16,8 @@ agency: rospotrebnadzor
 agency_label: "Роспотребнадзор"
 order: 1
 version: "2026-09-20"
+domain: "Магазины"
+section: "Магазин"
 items:
 
   - id: rt-shop-docs

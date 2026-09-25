@@ -143,7 +143,8 @@ def start_session(db: Session, venue: Venue) -> CheckSession:
         venue_id=venue.id,
         rules_version=book.version,
         verdicts=[
-            {"rule_id": v.rule.id, "applicable": v.applicable, "reasons": list(v.reasons)}
+            {"rule_id": v.rule.id, "applicable": v.applicable, "reasons": list(v.reasons),
+             "other_domain": v.other_domain}
             for v in verdicts
         ],
     )
@@ -277,6 +278,7 @@ def session_report(session: CheckSession) -> dict:
                 "rule": r,
                 "applicable": v["applicable"],
                 "reasons": v.get("reasons", []),
+                "other_domain": v.get("other_domain", ""),
                 "status": a.status if a else None,
                 "comment": a.comment if a else "",
                 "photo_path": a.photo_path if a else None,

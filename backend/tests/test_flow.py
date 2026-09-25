@@ -92,7 +92,8 @@ def test_full_flow(client):
     assert path.exists() and path.stat().st_size > 10_000
     from pypdf import PdfReader
     text = "".join(p.extract_text() or "" for p in PdfReader(str(path)).pages)
-    assert "Акт самопроверки" in text and "Пекарня" in text and "бракеража" in text
+    assert "Акт самопроверки" in text and "Пекарня" in text and "Проверочные листы" in text
+    assert "для других видов деятельности" in text  # магазины и столовые соцучреждений — одной строкой
 
     # Новая сессия — старая закрыта, счётчики обнулены.
     s2 = client.post("/api/session/new", headers=H).json()
@@ -104,7 +105,7 @@ def test_second_profile_is_smaller(client):
         svc.save_venue(db, UID, {"activity": "coffee", "has_kitchen": False, "own_production": False,
                                  "seats": 0, "staff": 0, "alcohol": False, "name": "Кофе с собой"})
     s = client.post("/api/session/new", headers=H).json()
-    assert len(s["applicable"]) <= 12
+    assert len(s["applicable"]) <= 20
     assert any("нет кухни" in r for x in s["not_applicable"] for r in x["reasons"])
 
 

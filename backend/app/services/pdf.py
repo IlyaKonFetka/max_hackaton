@@ -15,7 +15,7 @@ from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Tabl
 
 from ..config import BASE_DIR, settings
 from ..db import CheckSession, Venue
-from ..engine import PERIOD_LABELS, profile_summary_lines
+from ..engine import PERIOD_LABELS, funnel, profile_summary_lines
 from ..rulebook import get_rulebook
 from .sessions import local_date, local_datetime, session_report
 
@@ -75,6 +75,23 @@ def build_act(session: CheckSession, venue: Venue, owner_name: str) -> Path:
     prof_rows = [[Paragraph(_esc(line), base)] for line in profile_summary_lines(venue.profile, book)]
     story.append(_plain_table(prof_rows))
 
+    # Какие проверочные листы относятся к объекту
+    f = funnel(venue.profile, book)
+    if f["checklists_total"]:
+        story.append(Paragraph("Проверочные листы", h2))
+        fl_rows = []
+        for a in f["agencies"]:
+            txt = f"{a['label']}: относится {a['yes']} из {a['total']}"
+            if a["maybe"]:
+                txt += f", ещё {a['maybe']} — при условиях, которых нет в профиле"
+            fl_rows.append([Paragraph(_esc(txt), base)])
+        for d in f["detailed"]:
+            fl_rows.append([Paragraph(_esc(
+                f"{d['doc']}: к объекту относятся {d['applicable']} вопросов из {d['questions']}, "
+                f"{d['not_applicable']} не относятся по профилю, {d['other_domain']} — другие виды деятельности "
+                f"({', '.join(s.lower() for s in d['other_scopes'])})"), base)])
+        story.append(_plain_table(fl_rows))
+
     # Сводка
     c = report["counts"]
     applicable = sum(c.values())
@@ -86,7 +103,7 @@ def build_act(session: CheckSession, venue: Venue, owner_name: str) -> Path:
         [Paragraph("Требует уточнения («не знаю»)", base), Paragraph(str(c["unknown"]), bold)],
         [Paragraph("Не проверено", base), Paragraph(str(c["unanswered"]), bold)],
         [Paragraph("Не применимо к объекту", base),
-         Paragraph(str(sum(1 for it in report["items"] if not it["applicable"])), bold)],
+         Paragraph(str(sum(1 for it in report["items"] if not it["applicable"] and not it["other_domain"])), bold)],
     ]
     story.append(_plain_table(summary_rows, col_widths=[120 * mm, 30 * mm]))
 
@@ -138,7 +155,11 @@ def build_act(session: CheckSession, venue: Venue, owner_name: str) -> Path:
         story.append(_grid_table(rows, col_widths=[85 * mm, 25 * mm, 35 * mm, 25 * mm]))
 
     # Не применимо и почему
-    na = [it for it in report["items"] if not it["applicable"]]
+    na = [it for it in report["items"] if not it["applicable"] and not it["other_domain"]]
+    other: dict[str, int] = {}
+    for it in report["items"]:
+        if not it["applicable"] and it["other_domain"]:
+            other[it["other_domain"]] = other.get(it["other_domain"], 0) + 1
     if na:
         story.append(Paragraph("Требования, не применимые к объекту", h2))
         rows = [[Paragraph("Требование", bold), Paragraph("Почему не применимо", bold)]]
@@ -148,11 +169,17 @@ def build_act(session: CheckSession, venue: Venue, owner_name: str) -> Path:
                 Paragraph(_esc("; ".join(it["reasons"]) or "—"), small),
             ])
         story.append(_grid_table(rows, col_widths=[105 * mm, 65 * mm]))
+    if other:
+        story.append(Spacer(1, 4))
+        story.append(Paragraph(_esc(
+            "Требования справочника для других видов деятельности в акт не включены: "
+            + ", ".join(f"{d.lower()} — {n}" for d, n in other.items()) + "."), small))
 
     story.append(Spacer(1, 10))
     story.append(Paragraph(
         "Акт сформирован сервисом «Движок применимости» в мессенджере MAX на основании сведений, внесённых пользователем. "
-        "Перечень требований подготовлен вручную по опубликованным нормативным актам и является частичным; "
+        "Перечень требований подготовлен вручную по опубликованным нормативным актам. Проверочный лист Роспотребнадзора "
+        "для общественного питания разобран полностью, листы Роструда и МЧС — в части ключевых требований; "
         "документ носит информационный характер и не является декларацией соблюдения обязательных требований.",
         small))
     story.append(Paragraph(f"Сформировано: {local_datetime(session.finished_at or session.started_at, tz)}", small))

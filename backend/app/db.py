@@ -42,6 +42,8 @@ class User(Base):
     last_name: Mapped[str] = mapped_column(String(200), default="")
     username: Mapped[str | None] = mapped_column(String(200), nullable=True)
     chat_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # диалог с ботом
+    # Утреннее напоминание о чек-листе смены: None — ещё не открывал /shift, True — присылать, False — отказался
+    shift_reminders: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
@@ -205,6 +207,22 @@ SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
 
 def init_db() -> None:
     Base.metadata.create_all(engine)
+    _add_missing_columns()
+
+
+def _add_missing_columns() -> None:
+    """create_all не добавляет колонки в существующие таблицы; новые nullable-колонки добавляем сами."""
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if not insp.has_table(table.name):
+                continue
+            have = {c["name"] for c in insp.get_columns(table.name)}
+            for col in table.columns:
+                if col.name not in have and col.nullable:
+                    conn.execute(text(f'ALTER TABLE {table.name} ADD COLUMN {col.name} {col.type.compile(engine.dialect)}'))
 
 
 @contextmanager

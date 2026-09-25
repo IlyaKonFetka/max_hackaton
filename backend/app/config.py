@@ -58,6 +58,11 @@ class Settings:
     run_bot: bool = (_env("RUN_BOT", "1") or "1") == "1"
     reminder_interval_sec: int = int(_env("REMINDER_INTERVAL_SEC", "60") or 60)
     timezone_offset_hours: int = int(_env("TZ_OFFSET_HOURS", "3") or 3)  # Москва по умолчанию
+    # Помощник на языковой модели (OpenAI-совместимый API). Без ключа выключен.
+    llm_api_url: str = _env("LLM_API_URL", "") or ""
+    llm_api_key: str = _env("LLM_API_KEY", "") or ""
+    llm_model: str = _env("LLM_MODEL", "") or ""
+    llm_daily_limit: int = int(_env("LLM_DAILY_LIMIT", "20") or 20)
 
     @property
     def db_url(self) -> str:

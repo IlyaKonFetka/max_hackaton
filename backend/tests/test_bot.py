@@ -100,6 +100,13 @@ async def test_onboarding_to_result(fake):
         cur = fake.buttons(fake.last())
         assert any(b.payload.startswith(f"ans|{key}|") for b in cur), f"ожидался вопрос {key}, а пришло: {fake.last()['text']}"
         await press(f"ans|{key}|{idx}")
+    # Множественный выбор: галочки переключаются, «Готово» закрывает вопрос
+    assert any(b.payload == "mdone|services" for b in fake.buttons(fake.last()))
+    await press("mul|services|1")  # кофемашина
+    await press("mul|services|2")  # фритюр
+    await press("mul|services|2")  # передумали
+    marked = [b.text for b in fake.buttons(fake.sent[-1]) if b.text.startswith("✓")]
+    await press("mdone|services")
     # Регион — текст можно пропустить кнопкой; название — текстом
     assert any(getattr(b, "payload", None) == "skip|region" for b in fake.buttons(fake.last()))
     await press("skip|region")
@@ -107,11 +114,14 @@ async def test_onboarding_to_result(fake):
     await h.on_message(msg("Пекарня на Баумана"))
     assert "Проверьте профиль" in fake.last()["text"]
     assert "Кухня: есть кухня" in fake.last()["text"]
+    assert "Что есть в заведении: Кофемашина или торговый автомат" in fake.last()["text"]
+    assert "Фритюр" not in fake.last()["text"]
 
     # Подтверждаем → результат расчёта с кнопкой open_app и «почему не применимо»
     await press("onb|confirm")
     res = fake.last()
-    assert "применимо" in res["text"] and "Роспотребнадзор" in res["text"]
+    assert "В самопроверке" in res["text"] and "Роспотребнадзор" in res["text"]
+    assert "проверочных листов" in res["text"] and "из 124" in res["text"]
     payloads = [getattr(b, "payload", None) for b in fake.buttons(res)]
     assert any(p and p.startswith("why|") for p in payloads)
     types = [str(getattr(b, "type", "")) for b in fake.buttons(res)]
@@ -477,3 +487,25 @@ async def test_region_from_location(fake, monkeypatch):
         h._set_state(db, uid, "onb:region", {"profile": {}})
     await h.on_message(m("", [point]))
     assert any("55.7963, 49.1088" in x["text"] for x in fake.sent[-2:])
+
+
+@pytest.mark.asyncio
+async def test_shop_skips_kitchen_questions(fake):
+    await h.on_message(msg("/profile"))  # у пользователя уже может быть заведение из прошлых тестов
+    shop = next(i for i, b in enumerate(fake.buttons(fake.last())) if "Магазин" in b.text)
+    await press(f"ans|activity|{shop}")
+    # Вопросы про кухню, производство и «что есть в заведении» магазину не задаются
+    assert any(b.payload.startswith("ans|seats|") for b in fake.buttons(fake.last())), fake.last()["text"]
+    await press("ans|seats|0")
+    await press("ans|staff|1")
+    await press("ans|alcohol|0")
+    await press("skip|region")
+    await h.on_message(msg("Магазин у дома"))
+    assert "Кухня" not in fake.last()["text"]
+    await press("onb|confirm")
+    res = fake.last()["text"]
+    assert "Росалкогольтабакконтроль" in res
+    why = next(b.payload for b in fake.buttons(fake.last()) if getattr(b, "payload", "").startswith("why|"))
+    await press(why)
+    # Требования общепита магазину не перечисляются по одному, только одной строкой
+    assert "общественное питание" in fake.last()["text"] and "Их не показываю" in fake.last()["text"]

@@ -522,6 +522,60 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/ask:
+    post:
+      summary: Ask
+      description: Вопрос помощнику своими словами. Отвечает по справочнику заведения; применимость решает движок, не модель.
+      operationId: ask_api_ask_post
+      parameters:
+      - name: X-Max-Init-Data
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: initData мини-приложения MAX (подписан ботом) — основной способ
+          title: X-Max-Init-Data
+        description: initData мини-приложения MAX (подписан ботом) — основной способ
+      - name: X-Api-Key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Ключ тестового доступа для автоматизированной проверки
+          title: X-Api-Key
+        description: Ключ тестового доступа для автоматизированной проверки
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: 'Альтернатива X-Api-Key: `Bearer <ключ>`'
+          title: Authorization
+        description: 'Альтернатива X-Api-Key: `Bearer <ключ>`'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AskIn'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/rules:
     get:
       summary: Rules
@@ -560,6 +614,25 @@ components:
       required:
       - status
       title: AnswerIn
+    AskIn:
+      properties:
+        question:
+          type: string
+          maxLength: 1000
+          minLength: 2
+          title: Question
+          examples:
+          - Нужен ли мне журнал бракеража?
+        rule_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Rule Id
+          description: Если вопрос про конкретный пункт самопроверки
+      type: object
+      required:
+      - question
+      title: AskIn
     Body_put_photo_api_session__sessionId__answers__ruleId__photo_post:
       properties:
         file:
@@ -594,17 +667,19 @@ components:
         activity:
           type: string
           title: Activity
-          description: cafe | coffee | canteen | bakery | streetfood | bar | shop
+          description: cafe | coffee | canteen | canteen_org | bakery | streetfood | bar | shop
           examples:
           - cafe
         has_kitchen:
           type: boolean
           title: Has Kitchen
+          default: false
           examples:
           - true
         own_production:
           type: boolean
           title: Own Production
+          default: false
           examples:
           - true
         seats:
@@ -626,6 +701,16 @@ components:
           title: Alcohol
           examples:
           - false
+        services:
+          items:
+            type: string
+          type: array
+          title: Services
+          description: 'Что есть в заведении: delivery, drinks_machine, fryer, confectionery, catering, grill_outdoor, retail_counter,
+            residential'
+          examples:
+          - - drinks_machine
+            - fryer
         name:
           anyOf:
           - type: string
@@ -645,8 +730,6 @@ components:
       type: object
       required:
       - activity
-      - has_kitchen
-      - own_production
       - seats
       - staff
       - alcohol

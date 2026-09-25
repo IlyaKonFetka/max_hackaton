@@ -5,7 +5,7 @@
 # value — то, что попадает в профиль и с чем сравниваются предикаты.
 # Для диапазонов value — число (репрезентативное значение диапазона), чтобы предикаты gt/lt работали.
 
-version: "2026-09-20"
+version: "2026-09-26"
 
 fields:
   - key: activity
@@ -16,6 +16,7 @@ fields:
       - { value: cafe,       label: "Кафе / ресторан" }
       - { value: coffee,     label: "Кофейня" }
       - { value: canteen,    label: "Столовая" }
+      - { value: canteen_org, label: "Столовая в школе, больнице, соцучреждении" }
       - { value: bakery,     label: "Пекарня с залом" }
       - { value: streetfood, label: "Стрит-фуд / киоск" }
       - { value: bar,        label: "Бар" }
@@ -25,6 +26,8 @@ fields:
     label: "Кухня"
     question: "Есть ли собственная кухня — готовите ли блюда или кулинарию на месте?"
     type: bool
+    ask_if: {field: activity, nin: [shop]}
+    default: false
     options:
       - { value: true,  label: "Да, готовим" }
       - { value: false, label: "Нет, только разогрев или напитки" }
@@ -34,6 +37,8 @@ fields:
     label: "Собственное производство"
     question: "Есть ли собственное производство — полуфабрикаты, выпечка, заготовки впрок?"
     type: bool
+    ask_if: {field: activity, nin: [shop]}
+    default: false
     options:
       - { value: true,  label: "Да" }
       - { value: false, label: "Нет" }
@@ -67,6 +72,23 @@ fields:
       - { value: true,  label: "Да" }
       - { value: false, label: "Нет" }
     value_labels: { "true": "есть алкоголь", "false": "нет алкоголя" }
+
+  - key: services
+    label: "Что есть в заведении"
+    question: "Что из этого у вас есть? Отметьте всё подходящее и нажмите «Готово». Если ничего, сразу «Готово»."
+    type: multi
+    ask_if: {field: activity, nin: [shop]}
+    default: []
+    done_label: "Готово"
+    options:
+      - { value: delivery,       label: "Доставка или еда навынос",       absent: "нет доставки и навынос" }
+      - { value: drinks_machine, label: "Кофемашина или торговый автомат", absent: "нет кофемашины и автоматов" }
+      - { value: fryer,          label: "Фритюр",                          absent: "нет фритюра" }
+      - { value: confectionery,  label: "Кондитерский цех (торты, пирожные с кремом)", absent: "нет кондитерского цеха" }
+      - { value: catering,       label: "Кейтеринг, выездное обслуживание", absent: "нет кейтеринга" }
+      - { value: grill_outdoor,  label: "Готовим на улице: мангал, гриль", absent: "не готовите на улице" }
+      - { value: retail_counter, label: "Продаём свою продукцию через магазин или отдел кулинарии", absent: "не продаёте через магазин" }
+      - { value: residential,    label: "Заведение в жилом доме",          absent: "не в жилом доме" }
 
   - key: region
     label: "Регион"

@@ -1,7 +1,19 @@
-from .applicability import Verdict, applicable, evaluate, evaluate_all, profile_summary_lines, summary
-from .rules import PERIOD_LABELS, Field, Rule, Rulebook, Source, load_rulebook
+from .applicability import (
+    Verdict,
+    applicable,
+    checklists_for,
+    evaluate,
+    evaluate_all,
+    funnel,
+    normalize_profile,
+    profile_summary_lines,
+    should_ask,
+    summary,
+)
+from .rules import PERIOD_LABELS, Checklist, Field, Rule, Rulebook, Source, load_rulebook
 
 __all__ = [
-    "PERIOD_LABELS", "Field", "Rule", "Rulebook", "Source", "Verdict",
-    "applicable", "evaluate", "evaluate_all", "load_rulebook", "profile_summary_lines", "summary",
+    "PERIOD_LABELS", "Checklist", "Field", "Rule", "Rulebook", "Source", "Verdict",
+    "applicable", "checklists_for", "evaluate", "evaluate_all", "funnel", "load_rulebook", "normalize_profile",
+    "profile_summary_lines", "should_ask", "summary",
 ]

@@ -51,6 +51,16 @@ def question_kb(field: Field):
     return kb.as_markup()
 
 
+def multi_kb(field: Field, selected: list):
+    """Множественный выбор: отмеченные варианты с галочкой, внизу «Готово»."""
+    kb = InlineKeyboardBuilder()
+    for i, o in enumerate(field.options):
+        mark = "✓ " if o.value in selected else ""
+        kb.row(CallbackButton(text=f"{mark}{o.label}", payload=f"mul|{field.key}|{i}"))
+    kb.row(CallbackButton(text=field.done_label, payload=f"mdone|{field.key}"))
+    return kb.as_markup()
+
+
 def text_question_kb(field: Field):
     if not (field.location or (field.optional and field.skip_label)):
         return None
@@ -168,9 +178,18 @@ def shift_item_kb(check_id: int, rule_id: str):
     return kb.as_markup()
 
 
-def shift_summary_kb(check_id: int):
+def shift_summary_kb(check_id: int, reminders_off: bool = False):
     kb = InlineKeyboardBuilder()
     kb.row(CallbackButton(text="Пройти заново", payload=f"shrestart|{check_id}"))
+    if reminders_off:
+        kb.row(CallbackButton(text="Напоминать по утрам", payload="shon"))
+    return kb.as_markup()
+
+
+def shift_reminder_kb():
+    kb = InlineKeyboardBuilder()
+    kb.row(CallbackButton(text="Открыть чек-лист", payload="shift|show"))
+    kb.row(CallbackButton(text="Не присылать", payload="shoff"))
     return kb.as_markup()
 
 

@@ -10,9 +10,10 @@ from pydantic import BaseModel, Field
 
 from ..config import settings
 from ..db import CheckSession, Task, Venue, db_session
-from ..engine import evaluate_all, profile_summary_lines, summary
+from ..engine import checklists_for, evaluate_all, funnel, normalize_profile, profile_summary_lines, summary
 from ..rulebook import get_rulebook
 from ..services import sessions as svc
+from ..services import assistant
 from ..services.media import save_upload
 from .auth import MaxUser, current_user
 
@@ -53,7 +54,9 @@ def _session_payload(session: CheckSession, venue: Venue) -> dict:
             applicable.append(d)
         else:
             d["reasons"] = v.get("reasons", [])
+            d["other_domain"] = v.get("other_domain", "")
             not_applicable.append(d)
+    book = get_rulebook()
     return {
         "id": session.id,
         "started_at": session.started_at.isoformat(),
@@ -64,7 +67,10 @@ def _session_payload(session: CheckSession, venue: Venue) -> dict:
         "progress": svc.progress(session),
         "applicable": applicable,
         "not_applicable": not_applicable,
-        "agencies": [{"key": k, "label": lbl} for k, lbl in get_rulebook().agencies],
+        "agencies": [{"key": k, "label": lbl} for k, lbl in book.agencies],
+        "funnel": funnel(venue.profile, book),
+        "checklists": checklists_for(venue.profile, book),
+        "assistant": assistant.enabled(),
     }
 
 
@@ -227,20 +233,35 @@ async def task_done(taskId: int, file: UploadFile | None = File(default=None), u
 class ProfileIn(BaseModel):
     """Профиль объекта — те же поля, что задаёт онбординг в боте (rules/profile.yaml)."""
 
-    activity: str = Field(description="cafe | coffee | canteen | bakery | streetfood | bar | shop", examples=["cafe"])
-    has_kitchen: bool = Field(examples=[True])
-    own_production: bool = Field(examples=[True])
+    activity: str = Field(
+        description="cafe | coffee | canteen | canteen_org | bakery | streetfood | bar | shop", examples=["cafe"]
+    )
+    has_kitchen: bool = Field(default=False, examples=[True])
+    own_production: bool = Field(default=False, examples=[True])
     seats: int = Field(ge=0, description="Посадочных мест (0 — только навынос)", examples=[35])
     staff: int = Field(ge=0, description="Наёмных работников", examples=[10])
     alcohol: bool = Field(examples=[False])
+    services: list[str] = Field(
+        default_factory=list,
+        description="Что есть в заведении: delivery, drinks_machine, fryer, confectionery, catering, grill_outdoor, "
+        "retail_counter, residential",
+        examples=[["drinks_machine", "fryer"]],
+    )
     name: str | None = Field(default=None, max_length=200, examples=["Пекарня на Баумана"])
     region: str | None = Field(default=None, max_length=200, examples=["Республика Татарстан"])
 
     def engine_profile(self) -> dict:
-        allowed = {o.value for o in get_rulebook().field("activity").options}
+        book = get_rulebook()
+        allowed = {o.value for o in book.field("activity").options}
         if self.activity not in allowed:
             raise HTTPException(status_code=422, detail=f"activity: одно из {sorted(allowed)}")
-        return self.model_dump(exclude={"name", "region"})
+        known = {o.value for o in book.field("services").options}
+        unknown = sorted(set(self.services) - known)
+        if unknown:
+            raise HTTPException(status_code=422, detail=f"services: неизвестные значения {unknown}, допустимо {sorted(known)}")
+        p = self.model_dump(exclude={"name", "region"})
+        p["services"] = [s for s in dict.fromkeys(self.services)]
+        return normalize_profile(p, book)
 
 
 @router.post("/applicability")
@@ -253,7 +274,11 @@ def applicability(profile: ProfileIn):
         "rules_version": book.version,
         "summary": summary(p, book),
         "applicable": [v.rule.to_dict() for v in verdicts if v.applicable],
-        "not_applicable": [{**v.rule.to_dict(), "reasons": list(v.reasons)} for v in verdicts if not v.applicable],
+        "not_applicable": [
+            {**v.rule.to_dict(), "reasons": list(v.reasons), "other_domain": v.other_domain}
+            for v in verdicts if not v.applicable
+        ],
+        "checklists": checklists_for(p, book),
     }
 
 
@@ -272,6 +297,32 @@ def put_venue(profile: ProfileIn, user: MaxUser = Depends(current_user)):
                 "profile_lines": profile_summary_lines(venue.profile, get_rulebook()), "summary": summ}
 
 
+class AskIn(BaseModel):
+    question: str = Field(min_length=2, max_length=1000, examples=["Нужен ли мне журнал бракеража?"])
+    rule_id: str | None = Field(default=None, description="Если вопрос про конкретный пункт самопроверки")
+
+
+@router.post("/ask")
+async def ask(body: AskIn, user: MaxUser = Depends(current_user)):
+    """Вопрос помощнику своими словами. Отвечает по справочнику заведения; применимость решает движок, не модель."""
+    if not assistant.enabled():
+        raise HTTPException(status_code=503, detail="Помощник не подключён на этом сервере")
+    if assistant.remaining(user.id) <= 0:
+        raise HTTPException(status_code=429, detail="Лимит вопросов на сегодня исчерпан")
+    with db_session() as db:
+        venue = _venue_or_404(db, user)
+        profile = dict(venue.profile)
+    question = body.question
+    if body.rule_id:
+        r = svc.rules_by_id().get(body.rule_id)
+        if r is not None:
+            question = f"Вопрос про требование «{r.title}»: {question}"
+    answer = await assistant.ask(user.id, profile, question)
+    if answer is None:
+        raise HTTPException(status_code=502, detail="Помощник сейчас не отвечает, попробуйте позже")
+    return {"answer": answer, "disclaimer": assistant.DISCLAIMER, "remaining": assistant.remaining(user.id)}
+
+
 @router.get("/rules")
 def rules():
     book = get_rulebook()
@@ -283,4 +334,9 @@ def rules():
             for f in book.fields
         ],
         "rules": [r.to_dict() for r in book.rules],
+        "checklists": [
+            {"id": c.id, "agency": c.agency, "number": c.number, "title": c.title, "doc": c.doc,
+             "questions": c.questions, "coverage": c.coverage}
+            for c in book.checklists
+        ],
     }

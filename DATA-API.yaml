@@ -44,7 +44,7 @@ checks:
 
   - id: "applicability"
     name: "Движок применимости: требования для профиля объекта"
-    description: "Какие требования применимы к кафе с кухней и почему остальные не применимы"
+    description: "Какие требования и проверочные листы относятся к кафе с кухней и почему остальные не относятся"
     method: "POST"
     path: "/api/applicability"
     role: "public"
@@ -58,10 +58,11 @@ checks:
         seats: 35
         staff: 10
         alcohol: false
+        services: ["drinks_machine", "fryer"]
     expected:
       statusCodes: [200]
       contentType: "application/json"
-      requiredFields: ["rules_version", "summary", "applicable", "not_applicable"]
+      requiredFields: ["rules_version", "summary", "applicable", "not_applicable", "checklists"]
       bodySchema:
         type: "object"
         required: ["summary", "applicable", "not_applicable"]
@@ -90,6 +91,7 @@ checks:
         seats: 35
         staff: 10
         alcohol: false
+        services: ["drinks_machine", "fryer"]
         name: "Кафе — автоматическая проверка"
         region: "Республика Татарстан"
     expected:

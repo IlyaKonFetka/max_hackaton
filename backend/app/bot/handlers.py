@@ -15,9 +15,10 @@ from sqlalchemy import select
 
 from ..config import settings
 from ..db import BotState, CheckSession, Membership, ShiftCheck, ShiftItem, ShiftPhoto, Task, User, Venue, db_session, utcnow
-from ..engine import summary
+from ..engine import should_ask, summary
 from ..rulebook import get_rulebook
 from ..services import sessions as svc
+from ..services import assistant
 from ..services.geocode import region_by_point
 from ..services.media import download_from_max
 from . import keyboards as kb
@@ -100,7 +101,9 @@ async def start_onboarding(chat_id: int, user_id: int, intro: bool = True):
 
 async def _ask(chat_id: int, field_key: str):
     field = get_rulebook().field(field_key)
-    if field.type == "text":
+    if field.type == "multi":
+        await _send(chat_id, field.question, attachments=[kb.multi_kb(field, [])])
+    elif field.type == "text":
         await _send(chat_id, field.question, attachments=[kb.text_question_kb(field)] if kb.text_question_kb(field) else None)
     else:
         await _send(chat_id, field.question, attachments=[kb.question_kb(field)])
@@ -108,6 +111,7 @@ async def _ask(chat_id: int, field_key: str):
 
 async def _advance(chat_id: int, user_id: int, field_key: str, value, extra: dict | None = None):
     """Сохраняет ответ (и служебные поля вроде координат) и задаёт следующий вопрос или показывает сводку."""
+    book = get_rulebook()
     fields = _fields()
     keys = [f.key for f in fields]
     idx = keys.index(field_key)
@@ -117,10 +121,17 @@ async def _advance(chat_id: int, user_id: int, field_key: str, value, extra: dic
         profile = dict(data.get("profile") or {})
         profile[field_key] = value
         profile.update(extra or {})
+        data.pop("multi", None)
+        # Вопросы, которые этому заведению не задаём (магазину — про кухню), получают значение по умолчанию.
+        nxt = idx + 1
+        while nxt < len(fields) and not should_ask(fields[nxt], profile, book):
+            d = fields[nxt].default
+            profile[fields[nxt].key] = list(d) if isinstance(d, list) else d
+            nxt += 1
         data["profile"] = profile
-        if idx + 1 < len(fields):
-            _set_state(db, user_id, f"onb:{keys[idx + 1]}", data)
-            next_key = keys[idx + 1]
+        if nxt < len(fields):
+            _set_state(db, user_id, f"onb:{keys[nxt]}", data)
+            next_key = keys[nxt]
         else:
             _set_state(db, user_id, "onb:confirm", data)
             next_key = None
@@ -140,6 +151,29 @@ async def _region_from_location(chat_id: int, user_id: int, key: str, loc):
     shown = region or f"{lat:.4f}, {lon:.4f}"
     await _send(chat_id, f"Регион по точке на карте: {shown}." + ("" if region else " Название определить не удалось, сохраню координаты."))
     await _advance(chat_id, user_id, key, shown, extra={"lat": float(lat), "lon": float(lon)})
+
+
+async def _multi_answer(cb: MessageCallback, chat_id: int, user_id: int, head: str, parts: list[str]):
+    """Галочки в вопросе с множественным выбором. Выбор живёт в состоянии диалога до «Готово»."""
+    field = get_rulebook().field(parts[1])
+    with db_session() as db:
+        st = _state(db, user_id)
+        if st.state != f"onb:{field.key}":
+            await cb.ack(notification="Этот вопрос уже закрыт")
+            return
+        data = dict(st.data or {})
+        selected = list((data.get("multi") or {}).get(field.key) or [])
+        if head == "mul":
+            value = field.options[int(parts[2])].value
+            selected = [v for v in selected if v != value] if value in selected else selected + [value]
+            data["multi"] = {field.key: selected}
+            _set_state(db, user_id, st.state, data)
+    if head == "mul":
+        await _replace(cb, field.question, [kb.multi_kb(field, selected)])
+        return
+    shown = field.label_for(selected)
+    await _replace(cb, f"{field.question}\n— {shown}", [], notification="Готово")
+    await _advance(chat_id, user_id, field.key, [o.value for o in field.options if o.value in selected])
 
 
 async def _show_profile_summary(chat_id: int, profile: dict):
@@ -464,6 +498,9 @@ async def show_shift(chat_id: int, user_id: int):
         if venue is None:
             await start_onboarding(chat_id, user_id)
             return
+        u = db.get(User, user_id)
+        if u is not None and u.shift_reminders is None:
+            u.shift_reminders = True  # открыл чек-лист сам — значит, утреннее напоминание по делу
         rules = _shift_rules(venue)
         sc = _get_or_create_shift(db, venue, user_id, rules)
         items = _shift_items(db, sc.id)
@@ -587,6 +624,8 @@ async def _shift_summary(chat_id: int, user_id: int, check_id: int, cb: MessageC
         left = [r.title for r in rules if not items.get(r.id) or items[r.id].status is None]
         total = len(rules)
         date = sc.date
+        u = db.get(User, user_id)
+        reminders_off = bool(u is not None and u.shift_reminders is False)
     lines = [f"Смена {date[8:10]}.{date[5:7]}: выполнено {len(ok)} из {total}."]
     if no:
         lines.append("\nНе выполнено:\n" + "\n".join(f"• {t}" for t in no))
@@ -598,9 +637,9 @@ async def _shift_summary(chat_id: int, user_id: int, check_id: int, cb: MessageC
         lines.append("Все пункты закрыты. Хорошего дня.")
     text = "\n".join(lines)
     if cb is not None:
-        await _replace(cb, text, [kb.shift_summary_kb(check_id)], notification="Смена закрыта")
+        await _replace(cb, text, [kb.shift_summary_kb(check_id, reminders_off)], notification="Смена закрыта")
     else:
-        await _send(chat_id, text, attachments=[kb.shift_summary_kb(check_id)])
+        await _send(chat_id, text, attachments=[kb.shift_summary_kb(check_id, reminders_off)])
 
 
 async def _restart_shift(cb: MessageCallback, check_id: int):
@@ -812,6 +851,10 @@ async def on_message(event: MessageCreated):
                 return
             await _advance(chat_id, user_id, key, text[:200])
             return
+        if field.type == "multi":
+            selected = list((data.get("multi") or {}).get(field.key) or [])
+            await _send(chat_id, "Отметьте варианты кнопками и нажмите «Готово»:", attachments=[kb.multi_kb(field, selected)])
+            return
         await _send(chat_id, "Выберите вариант кнопкой:", attachments=[kb.question_kb(field)])
         return
 
@@ -831,7 +874,28 @@ async def on_message(event: MessageCreated):
         await _send(chat_id, "Ответьте кнопкой под пунктом или пришлите фото, оно засчитается как «выполнено».")
         return
 
+    if text and assistant.enabled():
+        await _ask_assistant(chat_id, user_id, text)
+        return
     await _send(chat_id, "Не понял. " + texts.HELP)
+
+
+async def _ask_assistant(chat_id: int, user_id: int, question: str):
+    with db_session() as db:
+        venue, _m = svc.role_of(db, user_id)
+        profile = dict(venue.profile) if venue is not None else None
+    if profile is None:
+        await _send(chat_id, "Сначала заполните профиль заведения, тогда смогу отвечать по вашим требованиям: /start")
+        return
+    if assistant.remaining(user_id) <= 0:
+        await _send(chat_id, "На сегодня вопросы помощнику закончились. Список требований с основаниями — в самопроверке.")
+        return
+    await _send(chat_id, "Смотрю в справочнике вашего заведения…")
+    answer = await assistant.ask(user_id, profile, question)
+    if answer is None:
+        await _send(chat_id, "Помощник сейчас не отвечает. Попробуйте позже или посмотрите основание в самопроверке.")
+        return
+    await _send(chat_id, f"{answer}\n\n{assistant.DISCLAIMER}")
 
 
 @dp.message_callback()
@@ -851,6 +915,8 @@ async def on_callback(cb: MessageCallback):
             opt = field.options[int(parts[2])]
             await _replace(cb, f"{field.question}\n— {opt.label}", [], notification=opt.label)
             await _advance(chat_id, user_id, field.key, opt.value)
+        elif head in ("mul", "mdone"):
+            await _multi_answer(cb, chat_id, user_id, head, parts)
         elif head == "skip":
             field = get_rulebook().field(parts[1])
             await _replace(cb, f"{field.question}\n— пропущено", [], notification="Пропущено")
@@ -917,6 +983,16 @@ async def on_callback(cb: MessageCallback):
         elif head == "shift":
             await cb.ack(notification="Чек-лист")
             await show_shift(chat_id, user_id)
+        elif head in ("shoff", "shon"):
+            with db_session() as db:
+                u = db.get(User, user_id)
+                if u is not None:
+                    u.shift_reminders = head == "shon"
+            if head == "shoff":
+                await _replace(cb, "Утренние напоминания о чек-листе смены отключены. Включить снова можно в конце чек-листа (/shift).", [],
+                               notification="Отключено")
+            else:
+                await cb.ack(notification="Буду напоминать в 9:00")
         elif head == "shq":
             await _answer_shift_item(cb, int(parts[1]), parts[2], parts[3])
         elif head == "shstop":
@@ -944,17 +1020,22 @@ async def _why(chat_id: int, session_id: int):
             await _send(chat_id, "Сессия не найдена. /status")
             return
         groups: dict[str, list[str]] = {}
+        other: dict[str, int] = {}
         for v in s.verdicts:
             if v["applicable"]:
                 continue
-            reason = "; ".join(v.get("reasons") or []) or "по условиям профиля"
             r = rules.get(v["rule_id"])
-            if r:
-                groups.setdefault(reason, []).append(f"{r.title} ({r.agency_label})")
-    if not groups:
+            if r is None:
+                continue
+            if v.get("other_domain"):
+                other[v["other_domain"]] = other.get(v["other_domain"], 0) + 1
+                continue
+            reason = "; ".join(v.get("reasons") or []) or "по условиям профиля"
+            groups.setdefault(reason, []).append(f"{r.title} ({r.agency_label})")
+    if not groups and not other:
         await _send(chat_id, "Все требования справочника применимы к вашему заведению.")
         return
-    await _send(chat_id, texts.why_text(groups))
+    await _send(chat_id, texts.why_text(groups, other))
 
 
 async def _new_check(chat_id: int, user_id: int):

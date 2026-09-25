@@ -168,11 +168,22 @@ function CheckScreen({ session, readOnly, tab, setTab, finishing, onFinish, onNe
   const p = session.progress
   const pct = p.total ? Math.round((p.answered / p.total) * 100) : 0
 
+  // Ведомство → раздел → пункты. Разделы нужны, когда пунктов за сорок: так проще найти «Персонал» или «Уборку».
   const grouped = useMemo(() => {
-    const m = new Map<string, ApplicableRule[]>()
-    for (const r of session.applicable) m.set(r.agency_label, [...(m.get(r.agency_label) ?? []), r])
-    return [...m.entries()]
+    const m = new Map<string, Map<string, ApplicableRule[]>>()
+    for (const r of session.applicable) {
+      const sections = m.get(r.agency_label) ?? new Map<string, ApplicableRule[]>()
+      const key = r.section || ''
+      sections.set(key, [...(sections.get(key) ?? []), r])
+      m.set(r.agency_label, sections)
+    }
+    return [...m.entries()].map(([agency, sections]) => ({
+      agency,
+      total: [...sections.values()].reduce((n, l) => n + l.length, 0),
+      sections: [...sections.entries()],
+    }))
   }, [session.applicable])
+  const naCount = session.not_applicable.filter((r) => !r.other_domain).length
 
   useEffect(() => {
     // Случайно смахнуть окно на середине списка обидно: при неотмеченных пунктах MAX переспросит.
@@ -196,7 +207,7 @@ function CheckScreen({ session, readOnly, tab, setTab, finishing, onFinish, onNe
             Применимо <span className="n">{session.applicable.length}</span>
           </button>
           <button className={`tab ${tab === 'na' ? 'active' : ''}`} onClick={() => setTab('na')}>
-            Не применимо <span className="n">{session.not_applicable.length}</span>
+            Не применимо <span className="n">{naCount}</span>
           </button>
           <button className={`tab ${tab === 'tasks' ? 'active' : ''}`} onClick={() => setTab('tasks')}>
             Задачи
@@ -205,22 +216,33 @@ function CheckScreen({ session, readOnly, tab, setTab, finishing, onFinish, onNe
       </div>
 
       {tab === 'check' &&
-        grouped.map(([agency, rules]) => (
+        grouped.map(({ agency, total, sections }) => (
           <div className="group" key={agency}>
-            <h3>{agency} · {rules.length}</h3>
-            {rules.map((r) => (
-              <RuleCard
-                key={r.id}
-                rule={r}
-                disabled={readOnly}
-                onStatus={(s) => onStatus(r, s)}
-                onComment={(c) => onComment(r, c)}
-                onPhoto={(f) => onPhoto(r, f)}
-              />
+            <h3>{agency} · {total}</h3>
+            {sections.map(([section, rules]) => (
+              <div key={section}>
+                {section && sections.length > 1 && (
+                  <p className="section">
+                    {section}
+                    <span>{rules.filter((r) => r.status).length}/{rules.length}</span>
+                  </p>
+                )}
+                {rules.map((r) => (
+                  <RuleCard
+                    key={r.id}
+                    rule={r}
+                    disabled={readOnly}
+                    canAsk={session.assistant}
+                    onStatus={(s) => onStatus(r, s)}
+                    onComment={(c) => onComment(r, c)}
+                    onPhoto={(f) => onPhoto(r, f)}
+                  />
+                ))}
+              </div>
             ))}
           </div>
         ))}
-      {tab === 'na' && <NotApplicable rules={session.not_applicable} />}
+      {tab === 'na' && <NotApplicable rules={session.not_applicable} funnel={session.funnel} checklists={session.checklists} />}
       {tab === 'tasks' && <Tasks />}
 
       {tab === 'check' && (

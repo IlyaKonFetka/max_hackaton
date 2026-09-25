@@ -1,26 +1,41 @@
 {
-  "rules_version": "2026-09-20",
-  "total_rules": 52,
+  "rules_version": "2026-09-26",
+  "total_rules": 74,
+  "total_checklists": 113,
   "profiles": [
     {
       "id": "cafe",
       "title": "Кафе с кухней",
-      "note": "Основной демо-профиль",
+      "note": "Основной демо-профиль: 21–50 мест, 6–15 работников, фритюр, кофемашина, в жилом доме",
       "profile": {
         "activity": "cafe",
         "has_kitchen": true,
         "own_production": true,
         "seats": 35,
         "staff": 10,
-        "alcohol": false
+        "alcohol": false,
+        "services": [
+          "drinks_machine",
+          "fryer",
+          "residential"
+        ]
       },
       "expected": {
-        "applicable": 34,
-        "not_applicable": 18,
+        "applicable": 46,
+        "not_applicable": 11,
+        "other_domain": 17,
         "by_agency": {
-          "Роспотребнадзор": 21,
-          "Роструд": 10,
+          "Роспотребнадзор": 30,
+          "Роструд": 13,
           "МЧС России": 3
+        },
+        "checklists_yes": 21,
+        "checklists_maybe": 22,
+        "rpn_808_2": {
+          "questions": 124,
+          "applicable": 85,
+          "not_applicable": 24,
+          "other_domain": 15
         }
       }
     },
@@ -34,59 +49,111 @@
         "own_production": false,
         "seats": 0,
         "staff": 0,
-        "alcohol": false
+        "alcohol": false,
+        "services": [
+          "drinks_machine"
+        ]
       },
       "expected": {
-        "applicable": 10,
-        "not_applicable": 42,
+        "applicable": 19,
+        "not_applicable": 38,
+        "other_domain": 17,
         "by_agency": {
-          "Роспотребнадзор": 8,
+          "Роспотребнадзор": 17,
           "МЧС России": 2
+        },
+        "checklists_yes": 2,
+        "checklists_maybe": 1,
+        "rpn_808_2": {
+          "questions": 124,
+          "applicable": 59,
+          "not_applicable": 50,
+          "other_domain": 15
         }
       }
     },
     {
       "id": "canteen",
       "title": "Столовая",
-      "note": "Бракераж и суточные пробы по СанПиН 4282-26 остаются только здесь",
+      "note": "Общедоступная столовая больше чем на 50 мест: план эвакуации есть, бракеража нет",
       "profile": {
         "activity": "canteen",
         "has_kitchen": true,
         "own_production": true,
         "seats": 80,
         "staff": 10,
-        "alcohol": false
+        "alcohol": false,
+        "services": [
+          "drinks_machine"
+        ]
       },
       "expected": {
-        "applicable": 37,
-        "not_applicable": 15,
+        "applicable": 45,
+        "not_applicable": 12,
+        "other_domain": 17,
         "by_agency": {
-          "Роспотребнадзор": 23,
-          "Роструд": 10,
+          "Роспотребнадзор": 28,
+          "Роструд": 13,
           "МЧС России": 4
+        },
+        "checklists_yes": 21,
+        "checklists_maybe": 22,
+        "rpn_808_2": {
+          "questions": 124,
+          "applicable": 83,
+          "not_applicable": 26,
+          "other_domain": 15
         }
+      }
+    },
+    {
+      "id": "canteen-org",
+      "title": "Столовая в школе или больнице",
+      "note": "Бракераж, суточные пробы и термометры на раздаче — только здесь",
+      "profile": {
+        "activity": "canteen_org",
+        "has_kitchen": true,
+        "own_production": true,
+        "seats": 80,
+        "staff": 10,
+        "alcohol": false,
+        "services": []
+      },
+      "expected": {
+        "applicable": 47,
+        "not_applicable": 13,
+        "other_domain": 14,
+        "by_agency": {
+          "Роспотребнадзор": 30,
+          "Роструд": 13,
+          "МЧС России": 4
+        },
+        "checklists_yes": 20,
+        "checklists_maybe": 26
       }
     },
     {
       "id": "shop",
       "title": "Магазин у дома",
-      "note": "Второй отраслевой справочник, rules/retail.yaml",
+      "note": "Второй отраслевой справочник: розница по СП 2.3.6.3668-20, с алкоголем",
       "profile": {
         "activity": "shop",
-        "has_kitchen": false,
-        "own_production": false,
         "seats": 0,
         "staff": 3,
         "alcohol": true
       },
       "expected": {
-        "applicable": 27,
-        "not_applicable": 25,
+        "applicable": 30,
+        "not_applicable": 3,
+        "other_domain": 41,
         "by_agency": {
-          "Роспотребнадзор": 15,
-          "Роструд": 9,
-          "МЧС России": 3
-        }
+          "Роспотребнадзор": 14,
+          "Роструд": 12,
+          "МЧС России": 3,
+          "Росалкогольтабакконтроль": 1
+        },
+        "checklists_yes": 22,
+        "checklists_maybe": 22
       }
     }
   ]

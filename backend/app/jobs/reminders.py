@@ -9,7 +9,8 @@ from datetime import timedelta
 from sqlalchemy import select
 
 from ..config import settings
-from ..db import Task, User, Venue, db_session, utcnow
+from ..db import Task, User, db_session, utcnow
+from ..bot.keyboards import shift_reminder_kb
 from ..services.notify import send_text
 from ..services.sessions import local_date
 
@@ -58,12 +59,11 @@ async def _remind_shift() -> None:
     if local.hour != SHIFT_REMINDER_HOUR or _last_shift_reminder_date == today:
         return
     _last_shift_reminder_date = today
+    # Только тем, кто сам открывал чек-лист смены и не отказался: остальным утреннее сообщение ни к чему.
     with db_session() as db:
-        venues = list(db.execute(select(Venue)).scalars().all())
-        owners = [db.get(User, v.owner_id) for v in venues]
-    for u in owners:
-        if u:
-            await send_text(u, "Доброе утро. Чек-лист смены на сегодня — /shift")
+        users = list(db.execute(select(User).where(User.shift_reminders.is_(True))).scalars().all())
+    for u in users:
+        await send_text(u, "Доброе утро. Чек-лист смены на сегодня.", attachments=[shift_reminder_kb()])
 
 
 async def reminder_loop() -> None:

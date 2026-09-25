@@ -1,10 +1,11 @@
 import { useRef, useState } from 'react'
-import type { ApplicableRule, Status } from '../api'
+import { api, type ApplicableRule, type Status } from '../api'
 import { haptic } from '../bridge'
 
 interface Props {
   rule: ApplicableRule
   disabled?: boolean
+  canAsk?: boolean
   onStatus: (status: Status) => Promise<void>
   onComment: (comment: string) => Promise<void>
   onPhoto: (file: File) => Promise<void>
@@ -13,7 +14,7 @@ interface Props {
 const STATUS_LABEL: Record<Status, string> = { ok: 'Соблюдается', violation: 'Нарушение', unknown: 'Не знаю' }
 const SEVERITY: Record<string, string> = { high: 'важное', medium: 'среднее', low: 'низкое' }
 
-export function RuleCard({ rule, disabled, onStatus, onComment, onPhoto }: Props) {
+export function RuleCard({ rule, disabled, canAsk, onStatus, onComment, onPhoto }: Props) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [comment, setComment] = useState(rule.comment ?? '')
@@ -110,6 +111,7 @@ export function RuleCard({ rule, disabled, onStatus, onComment, onPhoto }: Props
             Актуально на {src.as_of}
             {!src.verified && ' · реквизиты требуют сверки с текстом НПА'}
           </p>
+          {canAsk && <AskBox ruleId={rule.id} />}
         </div>
       )}
 
@@ -145,6 +147,42 @@ export function RuleCard({ rule, disabled, onStatus, onComment, onPhoto }: Props
         </div>
       )}
       {err && <div className="err">{err}</div>}
+    </div>
+  )
+}
+
+/** Вопрос помощнику про этот пункт. Отвечает по справочнику заведения, применимость не меняет. */
+function AskBox({ ruleId }: { ruleId: string }) {
+  const [q, setQ] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [answer, setAnswer] = useState<{ text: string; note: string } | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const send = async () => {
+    if (q.trim().length < 2 || busy) return
+    setBusy(true)
+    setErr(null)
+    try {
+      const r = await api.ask(q.trim(), ruleId)
+      setAnswer({ text: r.answer, note: r.disclaimer })
+    } catch (e) {
+      setErr((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="ask">
+      <textarea placeholder="Спросить про этот пункт своими словами" value={q} onChange={(e) => setQ(e.target.value)} />
+      <button type="button" className="linkbtn" onClick={send} disabled={busy}>
+        {busy ? 'Помощник думает…' : 'Спросить помощника'}
+      </button>
+      {err && <p className="err">{err}</p>}
+      {answer && (
+        <p className="answer">
+          {answer.text}
+          <span className="muted"> {answer.note}</span>
+        </p>
+      )}
     </div>
   )
 }
