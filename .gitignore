@@ -8,3 +8,6 @@ backend/static/
 miniapp/node_modules/
 miniapp/dist/
 tools/
+
+# Презентация входит в архив сдачи, в репозитории её нет
+presentation.pdf
