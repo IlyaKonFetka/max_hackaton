@@ -55,6 +55,7 @@ def llm(monkeypatch):
             calls.append({"url": url, "json": json, "headers": headers})
             return FakeResponse("Да, журнал фритюра нужен: п. 44 СанПиН 4282-26.")
 
+    monkeypatch.setattr(settings, "llm_provider", "openai")
     monkeypatch.setattr(settings, "llm_api_url", "https://llm.example/v1")
     monkeypatch.setattr(settings, "llm_api_key", "secret")
     monkeypatch.setattr(settings, "llm_model", "test-model")
@@ -64,7 +65,8 @@ def llm(monkeypatch):
     return calls
 
 
-def test_disabled_without_key(client):
+def test_disabled_without_key(client, monkeypatch):
+    monkeypatch.setattr(settings, "gigachat_auth_key", "")
     assert not assistant.enabled()
     r = client.post("/api/ask", json={"question": "Нужен ли журнал фритюра?"}, headers=H)
     assert r.status_code == 503
@@ -83,8 +85,8 @@ def test_answers_from_venue_rulebook(client, llm):
     # В контексте — применимые требования этого кафе с основаниями и неприменимые с причинами
     assert "Фритюрный жир" in system and "п. 44 СанПиН 4282-26" in system
     assert "Не применимы к этому заведению" in system and "Нет доставки и навынос" in system
-    # Требования магазинов не перечисляются по одному
-    assert "Холодильное оборудование оснащено термометрами; температура и влажность" not in system
+    # Требования других отраслей перечислены с пометкой, для кого они; периодичность человеческими словами
+    assert "Только для: Магазины" in system and "Периодичность: каждую смену" in system
     assert "Вопрос про требование «Фритюрный жир" in sent["json"]["messages"][1]["content"]
 
 
@@ -92,3 +94,51 @@ def test_daily_limit(client, llm):
     for _ in range(2):
         assert client.post("/api/ask", json={"question": "вопрос"}, headers=H).status_code == 200
     assert client.post("/api/ask", json={"question": "вопрос"}, headers=H).status_code == 429
+
+
+def test_gigachat_token_is_cached(client, monkeypatch):
+    """GigaChat: токен по ключу авторизации берётся один раз и переиспользуется, пока не истёк."""
+    import time
+
+    calls = []
+
+    class Resp(FakeResponse):
+        def __init__(self, body):
+            self.body = body
+
+        def json(self):
+            return self.body
+
+    class FakeClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json=None, headers=None, data=None):
+            calls.append((url, headers))
+            if url.endswith("/oauth"):
+                return Resp({"access_token": "tok", "expires_at": int((time.time() + 1800) * 1000)})
+            r = Resp({"choices": [{"message": {"content": "Нужен, п. 44."}}]})
+            r.status_code = 200
+            return r
+
+    monkeypatch.setattr(settings, "llm_provider", "gigachat")
+    monkeypatch.setattr(settings, "gigachat_auth_key", "base64key")
+    monkeypatch.setattr(settings, "llm_api_url", "")
+    monkeypatch.setattr(settings, "llm_model", "")
+    monkeypatch.setattr(settings, "llm_daily_limit", 5)
+    monkeypatch.setattr(assistant.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(assistant, "_token", {"value": "", "expires": 0.0})
+    assistant._used.clear()
+    for _ in range(2):
+        assert client.post("/api/ask", json={"question": "Нужен ли журнал фритюра?"}, headers=H).status_code == 200
+    oauth = [c for c in calls if c[0].endswith("/oauth")]
+    chat = [c for c in calls if c[0].endswith("/chat/completions")]
+    assert len(oauth) == 1 and oauth[0][1]["Authorization"] == "Basic base64key"
+    assert len(chat) == 2 and chat[0][1]["Authorization"] == "Bearer tok"
+    assert chat[0][0].startswith("https://gigachat.devices.sberbank.ru/api/v1")
