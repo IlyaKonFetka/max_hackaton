@@ -58,7 +58,7 @@ compose.yaml, Dockerfile  один контейнер: бэкенд, бот и �
 ## Запуск одной командой
 
 ```bash
-cp .env.example .env        # MAX_BOT_TOKEN нужен только для локального бота
+cp .env.example .env        # только при запуске из репозитория: в архиве сдачи .env уже заполнен
 docker compose up --build
 ```
 
