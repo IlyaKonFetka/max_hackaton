@@ -86,7 +86,7 @@ def test_answers_from_venue_rulebook(client, llm):
     assert "Фритюрный жир" in system and "п. 44 СанПиН 4282-26" in system
     assert "Не применимы к этому заведению" in system and "Нет доставки и навынос" in system
     # Требования других отраслей перечислены с пометкой, для кого они; периодичность человеческими словами
-    assert "Только для: Магазины" in system and "Периодичность: каждую смену" in system
+    assert "Только для: Магазины" in system and "Как часто отмечать в сервисе: каждую смену" in system
     assert "Вопрос про требование «Фритюрный жир" in sent["json"]["messages"][1]["content"]
 
 
