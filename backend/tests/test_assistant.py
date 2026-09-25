@@ -101,6 +101,7 @@ def test_gigachat_token_is_cached(client, monkeypatch):
     import time
 
     calls = []
+    quota_over = False
 
     class Resp(FakeResponse):
         def __init__(self, body):
@@ -123,7 +124,11 @@ def test_gigachat_token_is_cached(client, monkeypatch):
             calls.append((url, headers))
             if url.endswith("/oauth"):
                 return Resp({"access_token": "tok", "expires_at": int((time.time() + 1800) * 1000)})
-            r = Resp({"choices": [{"message": {"content": "Нужен, п. 44."}}]})
+            if json["model"] == "GigaChat-2-Max" and quota_over:
+                r = Resp({"message": "Payment Required"})
+                r.status_code = 402
+                return r
+            r = Resp({"choices": [{"message": {"content": f"Нужен, п. 44 ({json['model']})."}}]})
             r.status_code = 200
             return r
 
@@ -142,3 +147,8 @@ def test_gigachat_token_is_cached(client, monkeypatch):
     assert len(oauth) == 1 and oauth[0][1]["Authorization"] == "Basic base64key"
     assert len(chat) == 2 and chat[0][1]["Authorization"] == "Bearer tok"
     assert chat[0][0].startswith("https://gigachat.devices.sberbank.ru/api/v1")
+
+    # Квота Max закончилась — ответ приходит от Pro, а не ошибка
+    quota_over = True
+    r = client.post("/api/ask", json={"question": "Нужен ли журнал фритюра?"}, headers=H)
+    assert r.status_code == 200 and "GigaChat-2-Pro" in r.json()["answer"]

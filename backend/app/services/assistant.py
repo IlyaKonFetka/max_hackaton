@@ -37,6 +37,8 @@ DISCLAIMER = "Ответ составлен ИИ по справочнику с�
 GIGACHAT_OAUTH = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
 GIGACHAT_API = "https://gigachat.devices.sberbank.ru/api/v1"
 GIGACHAT_MODEL = "GigaChat-2-Max"
+# Если бесплатная квота основной модели закончилась (402), отвечаем моделью с отдельной квотой.
+GIGACHAT_FALLBACK = "GigaChat-2-Pro"
 RUSSIAN_CA = Path(__file__).resolve().parents[1] / "certs" / "russian_trusted_root_ca.pem"
 
 SYSTEM = (
@@ -138,6 +140,11 @@ async def _complete(messages: list[dict]) -> str:
             if r.status_code == 401:  # токен отозвали раньше срока — берём новый один раз
                 _token["value"] = ""
                 token = await _gigachat_token(c)
+                r = await c.post(f"{settings.llm_api_url or GIGACHAT_API}/chat/completions", json=payload,
+                                 headers={"Authorization": f"Bearer {token}"})
+            if r.status_code == 402 and payload["model"] != GIGACHAT_FALLBACK:
+                log.warning("квота %s закончилась, отвечаю моделью %s", payload["model"], GIGACHAT_FALLBACK)
+                payload["model"] = GIGACHAT_FALLBACK
                 r = await c.post(f"{settings.llm_api_url or GIGACHAT_API}/chat/completions", json=payload,
                                  headers={"Authorization": f"Bearer {token}"})
     else:

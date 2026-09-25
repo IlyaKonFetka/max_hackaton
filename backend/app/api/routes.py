@@ -308,7 +308,7 @@ async def ask(body: AskIn, user: MaxUser = Depends(current_user)):
     if not assistant.enabled():
         raise HTTPException(status_code=503, detail="Помощник не подключён на этом сервере")
     if assistant.remaining(user.id) <= 0:
-        raise HTTPException(status_code=429, detail="Лимит вопросов на сегодня исчерпан")
+        raise HTTPException(status_code=429, detail="Слишком много вопросов за сегодня, продолжим завтра")
     with db_session() as db:
         venue = _venue_or_404(db, user)
         profile = dict(venue.profile)

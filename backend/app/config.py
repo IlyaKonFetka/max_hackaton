@@ -67,7 +67,8 @@ class Settings:
     llm_api_url: str = _env("LLM_API_URL", "") or ""
     llm_api_key: str = _env("LLM_API_KEY", "") or ""
     llm_model: str = _env("LLM_MODEL", "") or ""
-    llm_daily_limit: int = int(_env("LLM_DAILY_LIMIT", "20") or 20)
+    # Предохранитель от зависшего цикла, а не ограничение для людей: проверяющий не должен в него упереться.
+    llm_daily_limit: int = int(_env("LLM_DAILY_LIMIT", "200") or 200)
 
     @property
     def db_url(self) -> str:
