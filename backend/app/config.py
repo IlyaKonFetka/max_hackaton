@@ -48,6 +48,13 @@ class Settings:
     port: int = int(_env("PORT", "8000") or 8000)
     # Режим разработки: принимать X-Debug-User вместо подписанного initData (никогда не включать в проде).
     debug_auth: bool = (_env("DEBUG_AUTH", "0") or "0") == "1"
+    # Ключи доступа к API без MAX (для автоматизированной технической проверки): "ключ:user_id,ключ2:user_id2".
+    # Каждый ключ даёт права ровно одного тестового пользователя — подделать реального пользователя MAX нельзя.
+    api_test_keys: dict[str, int] = {
+        k.strip(): int(v)
+        for k, _, v in (p.partition(":") for p in (_env("API_TEST_KEYS", "") or "").split(","))
+        if k.strip() and v.strip().isdigit()
+    }
     run_bot: bool = (_env("RUN_BOT", "1") or "1") == "1"
     reminder_interval_sec: int = int(_env("REMINDER_INTERVAL_SEC", "60") or 60)
     timezone_offset_hours: int = int(_env("TZ_OFFSET_HOURS", "3") or 3)  # Москва по умолчанию

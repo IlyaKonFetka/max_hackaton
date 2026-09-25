@@ -35,6 +35,10 @@ async def send_act(session_id: int) -> bool:
             return False
         venue = db.get(Venue, session.venue_id)
         owner = db.get(User, venue.owner_id)
+        if owner is None or not owner.chat_id:
+            # Пользователь без диалога с ботом (тестовый доступ через API) — PDF собираем, но слать некуда.
+            build_act(session, venue, "Эксперт (тестовый доступ)")
+            return False
         owner_name = f"{owner.first_name} {owner.last_name}".strip() or f"id {owner.id}"
         path = build_act(session, venue, owner_name)
         session.act_path = str(path)

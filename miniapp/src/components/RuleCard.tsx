@@ -1,7 +1,6 @@
 import { useRef, useState } from 'react'
 import type { ApplicableRule, Status } from '../api'
 import { haptic } from '../bridge'
-import { Photo } from './Photo'
 
 interface Props {
   rule: ApplicableRule
@@ -124,7 +123,7 @@ export function RuleCard({ rule, disabled, onStatus, onComment, onPhoto }: Props
             onBlur={saveComment}
           />
           <div className="photo-row">
-            {rule.photo_url && <Photo src={rule.photo_url} />}
+            {rule.photo_url && <img src={rule.photo_url} alt="" />}
             {!disabled && (
               <button type="button" className="photo-btn" onClick={pick} disabled={busy}>
                 {rule.photo_url ? 'Заменить фото' : 'Сфотографировать «как есть»'}
@@ -137,7 +136,7 @@ export function RuleCard({ rule, disabled, onStatus, onComment, onPhoto }: Props
       {rule.status === 'ok' && rule.evidence === 'photo' && !disabled && (
         <div className="viol-extra">
           <div className="photo-row">
-            {rule.photo_url && <Photo src={rule.photo_url} />}
+            {rule.photo_url && <img src={rule.photo_url} alt="" />}
             <button type="button" className="photo-btn" onClick={pick} disabled={busy}>
               {rule.photo_url ? 'Заменить фото' : 'Приложить фото-подтверждение'}
             </button>

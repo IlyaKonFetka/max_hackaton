@@ -1,0 +1,202 @@
+# DATA-API 1.0 — обязательные проверки API решения «Движок применимости».
+# Секреты здесь не хранятся. Роль "user" = тестовый пользователь: ключ передаётся через защищённый канал
+# (служебный слайд презентации) и подставляется в заголовок X-Api-Key (или Authorization: Bearer <ключ>).
+# Сценарий повторяемый: профиль заведения перезаписывается, каждая самопроверка создаётся заново.
+
+schemaVersion: "1.0"
+
+solution:
+  name: "Движок применимости — самопроверка общепита по обязательным требованиям в MAX"
+  teamId: "t419"
+
+api:
+  baseUrl: "https://185-246-64-221.sslip.io"
+  openapi: "./openapi.yaml"
+  defaultHeaders:
+    Accept: "application/json"
+
+checks:
+  - id: "health"
+    name: "Доступность сервиса"
+    description: "Сервис жив, справочник требований загружен"
+    method: "GET"
+    path: "/health"
+    role: "public"
+    expected:
+      statusCodes: [200]
+      contentType: "application/json"
+      requiredFields: ["status", "rules", "rules_version"]
+    timeoutMs: 5000
+    repeatable: true
+
+  - id: "rules"
+    name: "Справочник обязательных требований"
+    description: "Поля профиля объекта и все требования с реквизитами НПА и проверочных листов"
+    method: "GET"
+    path: "/api/rules"
+    role: "public"
+    expected:
+      statusCodes: [200]
+      contentType: "application/json"
+      requiredFields: ["version", "fields", "rules"]
+    timeoutMs: 5000
+    repeatable: true
+
+  - id: "applicability"
+    name: "Движок применимости: требования для профиля объекта"
+    description: "Ядро продукта — какие требования применимы к кафе с кухней и почему остальные не применимы"
+    method: "POST"
+    path: "/api/applicability"
+    role: "public"
+    request:
+      headers:
+        Content-Type: "application/json"
+      body:
+        activity: "cafe"
+        has_kitchen: true
+        own_production: true
+        seats: 35
+        staff: 10
+        alcohol: false
+    expected:
+      statusCodes: [200]
+      contentType: "application/json"
+      requiredFields: ["rules_version", "summary", "applicable", "not_applicable"]
+      bodySchema:
+        type: "object"
+        required: ["summary", "applicable", "not_applicable"]
+        properties:
+          applicable:
+            type: "array"
+            minItems: 1
+          not_applicable:
+            type: "array"
+    timeoutMs: 5000
+    repeatable: true
+
+  - id: "set-venue"
+    name: "Профиль заведения тестового пользователя"
+    description: "То же, что онбординг в боте; повторный вызов обновляет профиль"
+    method: "PUT"
+    path: "/api/venue"
+    role: "user"
+    request:
+      headers:
+        Content-Type: "application/json"
+      body:
+        activity: "cafe"
+        has_kitchen: true
+        own_production: true
+        seats: 35
+        staff: 10
+        alcohol: false
+        name: "Кафе — автоматическая проверка"
+        region: "Республика Татарстан"
+    expected:
+      statusCodes: [200]
+      contentType: "application/json"
+      requiredFields: ["id", "name", "summary"]
+    timeoutMs: 5000
+    repeatable: true
+
+  - id: "new-session"
+    name: "Новая самопроверка"
+    description: "Снимок применимых требований на текущей версии справочника"
+    method: "POST"
+    path: "/api/session/new"
+    role: "user"
+    dependsOn: ["set-venue"]
+    expected:
+      statusCodes: [200]
+      contentType: "application/json"
+      requiredFields: ["id", "progress", "applicable", "not_applicable"]
+    timeoutMs: 5000
+    repeatable: true
+    extract:
+      sessionId: "$.id"
+      ruleId: "$.applicable[0].id"
+
+  - id: "answer"
+    name: "Отметка пункта: нарушение"
+    method: "PUT"
+    path: "/api/session/{sessionId}/answers/{ruleId}"
+    role: "user"
+    dependsOn: ["new-session"]
+    request:
+      path:
+        sessionId: "${sessionId}"
+        ruleId: "${ruleId}"
+      headers:
+        Content-Type: "application/json"
+      body:
+        status: "violation"
+        comment: "Отмечено автоматической проверкой"
+    expected:
+      statusCodes: [200]
+      contentType: "application/json"
+      requiredFields: ["rule_id", "status", "progress"]
+    timeoutMs: 5000
+    repeatable: true
+
+  - id: "finish"
+    name: "Завершение самопроверки: нарушения становятся задачами"
+    method: "POST"
+    path: "/api/session/{sessionId}/finish"
+    role: "user"
+    dependsOn: ["answer"]
+    request:
+      path:
+        sessionId: "${sessionId}"
+    expected:
+      statusCodes: [200]
+      contentType: "application/json"
+      requiredFields: ["id", "counts", "tasks"]
+    timeoutMs: 10000
+    repeatable: true
+    extract:
+      taskId: "$.tasks[0].id"
+
+  - id: "read-session"
+    name: "Чтение завершённой самопроверки"
+    method: "GET"
+    path: "/api/session"
+    role: "user"
+    dependsOn: ["finish"]
+    request:
+      query:
+        id: "${sessionId}"
+    expected:
+      statusCodes: [200]
+      contentType: "application/json"
+      requiredFields: ["id", "finished_at", "progress", "applicable"]
+    timeoutMs: 5000
+    repeatable: true
+
+  - id: "tasks"
+    name: "План устранения: открытые задачи"
+    method: "GET"
+    path: "/api/tasks"
+    role: "user"
+    dependsOn: ["finish"]
+    expected:
+      statusCodes: [200]
+      contentType: "application/json"
+      requiredFields: ["tasks"]
+    timeoutMs: 5000
+    repeatable: true
+
+  - id: "task-done"
+    name: "Закрытие задачи"
+    method: "POST"
+    path: "/api/tasks/{taskId}/done"
+    role: "user"
+    dependsOn: ["tasks"]
+    request:
+      path:
+        taskId: "${taskId}"
+    expected:
+      statusCodes: [200]
+      contentType: "application/json"
+      requiredFields: ["id", "status"]
+    timeoutMs: 5000
+    repeatable: true

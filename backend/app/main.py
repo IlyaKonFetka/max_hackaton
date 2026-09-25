@@ -84,7 +84,7 @@ app.include_router(router)
 @app.get("/health")
 def health():
     book = get_rulebook()
-    return {"ok": True, "rules": len(book.rules), "rules_version": book.version}
+    return {"status": "ok", "ok": True, "rules": len(book.rules), "rules_version": book.version}
 
 
 # Фото — по случайным именам, только чтение.

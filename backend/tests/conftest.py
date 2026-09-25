@@ -9,4 +9,5 @@ os.environ["DATA_DIR"] = _tmp
 os.environ["RUN_BOT"] = "0"
 os.environ["DEBUG_AUTH"] = "1"
 os.environ.setdefault("MAX_BOT_TOKEN", "test-token")
+os.environ["API_TEST_KEYS"] = "test-key:900000001"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))

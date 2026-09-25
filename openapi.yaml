@@ -1,0 +1,685 @@
+openapi: 3.1.0
+info:
+  title: Движок применимости — API
+  version: 0.1.0
+  description: 'REST-API сервиса «Движок применимости» (бот + мини-приложение MAX). Публичные методы: /health, /api/rules,
+    /api/applicability. Остальные требуют авторизации: в мини-приложении — заголовок X-Max-Init-Data (initData MAX, HMAC-SHA256
+    от токена бота); для автоматизированной проверки — заголовок X-Api-Key (или Authorization: Bearer) с тестовым ключом.'
+paths:
+  /api/me:
+    get:
+      summary: Me
+      operationId: me_api_me_get
+      parameters:
+      - name: X-Max-Init-Data
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: initData мини-приложения MAX (подписан ботом) — основной способ
+          title: X-Max-Init-Data
+        description: initData мини-приложения MAX (подписан ботом) — основной способ
+      - name: X-Api-Key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Ключ тестового доступа для автоматизированной проверки
+          title: X-Api-Key
+        description: Ключ тестового доступа для автоматизированной проверки
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: 'Альтернатива X-Api-Key: `Bearer <ключ>`'
+          title: Authorization
+        description: 'Альтернатива X-Api-Key: `Bearer <ключ>`'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/session:
+    get:
+      summary: Get Session
+      description: Текущая самопроверка. Без id — открытая (или последняя); с id — конкретная (из start_param `s<id>`).
+      operationId: get_session_api_session_get
+      parameters:
+      - name: id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Id
+      - name: X-Max-Init-Data
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: initData мини-приложения MAX (подписан ботом) — основной способ
+          title: X-Max-Init-Data
+        description: initData мини-приложения MAX (подписан ботом) — основной способ
+      - name: X-Api-Key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Ключ тестового доступа для автоматизированной проверки
+          title: X-Api-Key
+        description: Ключ тестового доступа для автоматизированной проверки
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: 'Альтернатива X-Api-Key: `Bearer <ключ>`'
+          title: Authorization
+        description: 'Альтернатива X-Api-Key: `Bearer <ключ>`'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/session/new:
+    post:
+      summary: New Session
+      operationId: new_session_api_session_new_post
+      parameters:
+      - name: X-Max-Init-Data
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: initData мини-приложения MAX (подписан ботом) — основной способ
+          title: X-Max-Init-Data
+        description: initData мини-приложения MAX (подписан ботом) — основной способ
+      - name: X-Api-Key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Ключ тестового доступа для автоматизированной проверки
+          title: X-Api-Key
+        description: Ключ тестового доступа для автоматизированной проверки
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: 'Альтернатива X-Api-Key: `Bearer <ключ>`'
+          title: Authorization
+        description: 'Альтернатива X-Api-Key: `Bearer <ключ>`'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/session/{sessionId}/answers/{ruleId}:
+    put:
+      summary: Put Answer
+      operationId: put_answer_api_session__sessionId__answers__ruleId__put
+      parameters:
+      - name: sessionId
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Sessionid
+      - name: ruleId
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Ruleid
+      - name: X-Max-Init-Data
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: initData мини-приложения MAX (подписан ботом) — основной способ
+          title: X-Max-Init-Data
+        description: initData мини-приложения MAX (подписан ботом) — основной способ
+      - name: X-Api-Key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Ключ тестового доступа для автоматизированной проверки
+          title: X-Api-Key
+        description: Ключ тестового доступа для автоматизированной проверки
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: 'Альтернатива X-Api-Key: `Bearer <ключ>`'
+          title: Authorization
+        description: 'Альтернатива X-Api-Key: `Bearer <ключ>`'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnswerIn'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/session/{sessionId}/answers/{ruleId}/photo:
+    post:
+      summary: Put Photo
+      operationId: put_photo_api_session__sessionId__answers__ruleId__photo_post
+      parameters:
+      - name: sessionId
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Sessionid
+      - name: ruleId
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Ruleid
+      - name: X-Max-Init-Data
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: initData мини-приложения MAX (подписан ботом) — основной способ
+          title: X-Max-Init-Data
+        description: initData мини-приложения MAX (подписан ботом) — основной способ
+      - name: X-Api-Key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Ключ тестового доступа для автоматизированной проверки
+          title: X-Api-Key
+        description: Ключ тестового доступа для автоматизированной проверки
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: 'Альтернатива X-Api-Key: `Bearer <ключ>`'
+          title: Authorization
+        description: 'Альтернатива X-Api-Key: `Bearer <ключ>`'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_put_photo_api_session__sessionId__answers__ruleId__photo_post'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/session/{sessionId}/finish:
+    post:
+      summary: Finish
+      operationId: finish_api_session__sessionId__finish_post
+      parameters:
+      - name: sessionId
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Sessionid
+      - name: X-Max-Init-Data
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: initData мини-приложения MAX (подписан ботом) — основной способ
+          title: X-Max-Init-Data
+        description: initData мини-приложения MAX (подписан ботом) — основной способ
+      - name: X-Api-Key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Ключ тестового доступа для автоматизированной проверки
+          title: X-Api-Key
+        description: Ключ тестового доступа для автоматизированной проверки
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: 'Альтернатива X-Api-Key: `Bearer <ключ>`'
+          title: Authorization
+        description: 'Альтернатива X-Api-Key: `Bearer <ключ>`'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/tasks:
+    get:
+      summary: Tasks
+      operationId: tasks_api_tasks_get
+      parameters:
+      - name: X-Max-Init-Data
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: initData мини-приложения MAX (подписан ботом) — основной способ
+          title: X-Max-Init-Data
+        description: initData мини-приложения MAX (подписан ботом) — основной способ
+      - name: X-Api-Key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Ключ тестового доступа для автоматизированной проверки
+          title: X-Api-Key
+        description: Ключ тестового доступа для автоматизированной проверки
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: 'Альтернатива X-Api-Key: `Bearer <ключ>`'
+          title: Authorization
+        description: 'Альтернатива X-Api-Key: `Bearer <ключ>`'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/tasks/{taskId}/done:
+    post:
+      summary: Task Done
+      operationId: task_done_api_tasks__taskId__done_post
+      parameters:
+      - name: taskId
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Taskid
+      - name: X-Max-Init-Data
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: initData мини-приложения MAX (подписан ботом) — основной способ
+          title: X-Max-Init-Data
+        description: initData мини-приложения MAX (подписан ботом) — основной способ
+      - name: X-Api-Key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Ключ тестового доступа для автоматизированной проверки
+          title: X-Api-Key
+        description: Ключ тестового доступа для автоматизированной проверки
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: 'Альтернатива X-Api-Key: `Bearer <ключ>`'
+          title: Authorization
+        description: 'Альтернатива X-Api-Key: `Bearer <ключ>`'
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_task_done_api_tasks__taskId__done_post'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/applicability:
+    post:
+      summary: Applicability
+      description: 'Ядро продукта без авторизации: какие требования применимы к объекту с таким профилем и почему остальные
+        — нет.'
+      operationId: applicability_api_applicability_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileIn'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/venue:
+    put:
+      summary: Put Venue
+      description: Профиль заведения пользователя (то же, что онбординг в боте). Повторный вызов обновляет профиль.
+      operationId: put_venue_api_venue_put
+      parameters:
+      - name: X-Max-Init-Data
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: initData мини-приложения MAX (подписан ботом) — основной способ
+          title: X-Max-Init-Data
+        description: initData мини-приложения MAX (подписан ботом) — основной способ
+      - name: X-Api-Key
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Ключ тестового доступа для автоматизированной проверки
+          title: X-Api-Key
+        description: Ключ тестового доступа для автоматизированной проверки
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: 'Альтернатива X-Api-Key: `Bearer <ключ>`'
+          title: Authorization
+        description: 'Альтернатива X-Api-Key: `Bearer <ключ>`'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileIn'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/rules:
+    get:
+      summary: Rules
+      operationId: rules_api_rules_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /health:
+    get:
+      summary: Health
+      operationId: health_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+components:
+  schemas:
+    AnswerIn:
+      properties:
+        status:
+          type: string
+          pattern: ^(ok|violation|unknown)$
+          title: Status
+        comment:
+          anyOf:
+          - type: string
+            maxLength: 1000
+          - type: 'null'
+          title: Comment
+      type: object
+      required:
+      - status
+      title: AnswerIn
+    Body_put_photo_api_session__sessionId__answers__ruleId__photo_post:
+      properties:
+        file:
+          type: string
+          contentMediaType: application/octet-stream
+          title: File
+      type: object
+      required:
+      - file
+      title: Body_put_photo_api_session__sessionId__answers__ruleId__photo_post
+    Body_task_done_api_tasks__taskId__done_post:
+      properties:
+        file:
+          anyOf:
+          - type: string
+            contentMediaType: application/octet-stream
+          - type: 'null'
+          title: File
+      type: object
+      title: Body_task_done_api_tasks__taskId__done_post
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    ProfileIn:
+      properties:
+        activity:
+          type: string
+          title: Activity
+          description: cafe | coffee | canteen | bakery | streetfood | bar | shop
+          examples:
+          - cafe
+        has_kitchen:
+          type: boolean
+          title: Has Kitchen
+          examples:
+          - true
+        own_production:
+          type: boolean
+          title: Own Production
+          examples:
+          - true
+        seats:
+          type: integer
+          minimum: 0.0
+          title: Seats
+          description: Посадочных мест (0 — только навынос)
+          examples:
+          - 35
+        staff:
+          type: integer
+          minimum: 0.0
+          title: Staff
+          description: Наёмных работников
+          examples:
+          - 10
+        alcohol:
+          type: boolean
+          title: Alcohol
+          examples:
+          - false
+        name:
+          anyOf:
+          - type: string
+            maxLength: 200
+          - type: 'null'
+          title: Name
+          examples:
+          - Пекарня на Баумана
+        region:
+          anyOf:
+          - type: string
+            maxLength: 200
+          - type: 'null'
+          title: Region
+          examples:
+          - Республика Татарстан
+      type: object
+      required:
+      - activity
+      - has_kitchen
+      - own_production
+      - seats
+      - staff
+      - alcohol
+      title: ProfileIn
+      description: Профиль объекта — те же поля, что задаёт онбординг в боте (rules/profile.yaml).
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+servers:
+- url: https://185-246-64-221.sslip.io
+  description: Сервер проверки
+- url: http://localhost:8000
+  description: Локальный запуск (docker compose up)

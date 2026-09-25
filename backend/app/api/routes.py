@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from ..config import settings
 from ..db import CheckSession, Task, Venue, db_session
-from ..engine import profile_summary_lines
+from ..engine import evaluate_all, profile_summary_lines, summary
 from ..rulebook import get_rulebook
 from ..services import sessions as svc
 from ..services.media import save_upload
@@ -120,25 +120,25 @@ class AnswerIn(BaseModel):
     comment: str | None = Field(default=None, max_length=1000)
 
 
-@router.put("/session/{session_id}/answers/{rule_id}")
-def put_answer(session_id: int, rule_id: str, body: AnswerIn, user: MaxUser = Depends(current_user)):
+@router.put("/session/{sessionId}/answers/{ruleId}")
+def put_answer(sessionId: int, ruleId: str, body: AnswerIn, user: MaxUser = Depends(current_user)):
     with db_session() as db:
         venue = _venue_or_404(db, user)
-        s = db.get(CheckSession, session_id)
+        s = db.get(CheckSession, sessionId)
         if s is None or s.venue_id != venue.id:
             raise HTTPException(status_code=404, detail="Сессия не найдена")
         if s.finished_at:
             raise HTTPException(status_code=409, detail="Самопроверка уже завершена — начните новую")
         try:
-            a = svc.set_answer(db, s, rule_id, body.status, comment=body.comment)
+            a = svc.set_answer(db, s, ruleId, body.status, comment=body.comment)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
         return {"rule_id": a.rule_id, "status": a.status, "comment": a.comment,
                 "photo_url": _photo_url(a.photo_path), "progress": svc.progress(s)}
 
 
-@router.post("/session/{session_id}/answers/{rule_id}/photo")
-async def put_photo(session_id: int, rule_id: str, file: UploadFile = File(...), user: MaxUser = Depends(current_user)):
+@router.post("/session/{sessionId}/answers/{ruleId}/photo")
+async def put_photo(sessionId: int, ruleId: str, file: UploadFile = File(...), user: MaxUser = Depends(current_user)):
     content = await file.read()
     try:
         rel = save_upload(content, file.content_type, file.filename)
@@ -146,25 +146,25 @@ async def put_photo(session_id: int, rule_id: str, file: UploadFile = File(...),
         raise HTTPException(status_code=400, detail=str(e)) from e
     with db_session() as db:
         venue = _venue_or_404(db, user)
-        s = db.get(CheckSession, session_id)
+        s = db.get(CheckSession, sessionId)
         if s is None or s.venue_id != venue.id:
             raise HTTPException(status_code=404, detail="Сессия не найдена")
         if s.finished_at:
             raise HTTPException(status_code=409, detail="Самопроверка уже завершена")
-        existing = {a.rule_id: a for a in s.answers}.get(rule_id)
+        existing = {a.rule_id: a for a in s.answers}.get(ruleId)
         status = existing.status if existing else "violation"
         try:
-            a = svc.set_answer(db, s, rule_id, status, photo_path=rel)
+            a = svc.set_answer(db, s, ruleId, status, photo_path=rel)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
         return {"rule_id": a.rule_id, "status": a.status, "photo_url": _photo_url(a.photo_path)}
 
 
-@router.post("/session/{session_id}/finish")
-async def finish(session_id: int, user: MaxUser = Depends(current_user)):
+@router.post("/session/{sessionId}/finish")
+async def finish(sessionId: int, user: MaxUser = Depends(current_user)):
     with db_session() as db:
         venue = _venue_or_404(db, user)
-        s = db.get(CheckSession, session_id)
+        s = db.get(CheckSession, sessionId)
         if s is None or s.venue_id != venue.id:
             raise HTTPException(status_code=404, detail="Сессия не найдена")
         p = svc.progress(s)
@@ -180,8 +180,8 @@ async def finish(session_id: int, user: MaxUser = Depends(current_user)):
     if settings.run_bot:
         from ..services.notify import send_act
 
-        asyncio.create_task(send_act(session_id))
-    return {"id": session_id, "counts": counts, "tasks": tasks, "act_sent_to_chat": settings.run_bot}
+        asyncio.create_task(send_act(sessionId))
+    return {"id": sessionId, "counts": counts, "tasks": tasks, "act_sent_to_chat": settings.run_bot}
 
 
 def _task_dict(t: Task) -> dict:
@@ -207,8 +207,8 @@ def tasks(user: MaxUser = Depends(current_user)):
         return {"tasks": out}
 
 
-@router.post("/tasks/{task_id}/done")
-async def task_done(task_id: int, file: UploadFile | None = File(default=None), user: MaxUser = Depends(current_user)):
+@router.post("/tasks/{taskId}/done")
+async def task_done(taskId: int, file: UploadFile | None = File(default=None), user: MaxUser = Depends(current_user)):
     rel = None
     if file is not None:
         try:
@@ -216,12 +216,60 @@ async def task_done(task_id: int, file: UploadFile | None = File(default=None), 
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
     with db_session() as db:
-        t = db.get(Task, task_id)
+        t = db.get(Task, taskId)
         if t is None or (t.owner_id != user.id and t.assignee_user_id != user.id):
             raise HTTPException(status_code=404, detail="Задача не найдена")
         if t.status == "open":
             svc.complete_task(db, t, rel)
         return _task_dict(t)
+
+
+class ProfileIn(BaseModel):
+    """Профиль объекта — те же поля, что задаёт онбординг в боте (rules/profile.yaml)."""
+
+    activity: str = Field(description="cafe | coffee | canteen | bakery | streetfood | bar | shop", examples=["cafe"])
+    has_kitchen: bool = Field(examples=[True])
+    own_production: bool = Field(examples=[True])
+    seats: int = Field(ge=0, description="Посадочных мест (0 — только навынос)", examples=[35])
+    staff: int = Field(ge=0, description="Наёмных работников", examples=[10])
+    alcohol: bool = Field(examples=[False])
+    name: str | None = Field(default=None, max_length=200, examples=["Пекарня на Баумана"])
+    region: str | None = Field(default=None, max_length=200, examples=["Республика Татарстан"])
+
+    def engine_profile(self) -> dict:
+        allowed = {o.value for o in get_rulebook().field("activity").options}
+        if self.activity not in allowed:
+            raise HTTPException(status_code=422, detail=f"activity: одно из {sorted(allowed)}")
+        return self.model_dump(exclude={"name", "region"})
+
+
+@router.post("/applicability")
+def applicability(profile: ProfileIn):
+    """Ядро продукта без авторизации: какие требования применимы к объекту с таким профилем и почему остальные — нет."""
+    p = profile.engine_profile()
+    book = get_rulebook()
+    verdicts = evaluate_all(p, book)
+    return {
+        "rules_version": book.version,
+        "summary": summary(p, book),
+        "applicable": [v.rule.to_dict() for v in verdicts if v.applicable],
+        "not_applicable": [{**v.rule.to_dict(), "reasons": list(v.reasons)} for v in verdicts if not v.applicable],
+    }
+
+
+@router.put("/venue")
+def put_venue(profile: ProfileIn, user: MaxUser = Depends(current_user)):
+    """Профиль заведения пользователя (то же, что онбординг в боте). Повторный вызов обновляет профиль."""
+    p = profile.engine_profile()
+    with db_session() as db:
+        svc.get_or_create_user(db, user.id, user.first_name, user.last_name, user.username)
+        _v, m = svc.role_of(db, user.id)
+        if m is not None and m.role == "staff":
+            raise HTTPException(status_code=403, detail="Сотрудник не может менять профиль заведения")
+        venue = svc.save_venue(db, user.id, {**p, "name": profile.name or "Моё заведение", "region": profile.region or ""})
+        summ = summary(venue.profile, get_rulebook())
+        return {"id": venue.id, "name": venue.name, "region": venue.region,
+                "profile_lines": profile_summary_lines(venue.profile, get_rulebook()), "summary": summ}
 
 
 @router.get("/rules")

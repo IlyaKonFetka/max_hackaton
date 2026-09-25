@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import { Button, Spinner } from '@maxhub/max-ui'
 import { api, type Task } from '../api'
 import { haptic } from '../bridge'
-import { Photo } from './Photo'
 
 function fmt(iso: string): string {
   const d = new Date(iso)
@@ -69,7 +68,7 @@ export function Tasks() {
               {t.assignee_name && <span>Ответственный: {t.assignee_name}</span>}
             </div>
             <div className="photo-row" style={{ marginTop: 10 }}>
-              {t.photo_before_url && <Photo src={t.photo_before_url} alt="как есть" />}
+              {t.photo_before_url && <img src={t.photo_before_url} alt="как есть" />}
               <Button size="small" variant="secondary" disabled={busyId === t.id} onClick={() => withPhoto(t)}>
                 Выполнено, с фото
               </Button>

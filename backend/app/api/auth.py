@@ -70,9 +70,19 @@ def _user_from_data(data: dict) -> MaxUser:
 
 
 async def current_user(
-    x_max_init_data: str | None = Header(default=None, alias="X-Max-Init-Data"),
-    x_debug_user: str | None = Header(default=None, alias="X-Debug-User"),
+    x_max_init_data: str | None = Header(default=None, alias="X-Max-Init-Data",
+                                         description="initData мини-приложения MAX (подписан ботом) — основной способ"),
+    x_api_key: str | None = Header(default=None, alias="X-Api-Key",
+                                   description="Ключ тестового доступа для автоматизированной проверки"),
+    authorization: str | None = Header(default=None, description="Альтернатива X-Api-Key: `Bearer <ключ>`"),
+    x_debug_user: str | None = Header(default=None, alias="X-Debug-User", include_in_schema=False),
 ) -> MaxUser:
+    key = x_api_key or (authorization[7:].strip() if authorization and authorization.lower().startswith("bearer ") else None)
+    if key:
+        uid = settings.api_test_keys.get(key)
+        if uid is None:
+            raise HTTPException(status_code=401, detail="неверный ключ доступа")
+        return MaxUser(id=uid, first_name="Эксперт", last_name="(тестовый доступ)")
     if x_max_init_data:
         try:
             data = verify_init_data(x_max_init_data, settings.bot_token)
