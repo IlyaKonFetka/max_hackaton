@@ -1,0 +1,8 @@
+# HTTPS-прокси перед бэкендом (сервер проверки). Caddy сам получает сертификат Let's Encrypt.
+# Домен — публичный сервис sslip.io: 185-246-64-221.sslip.io резолвится в IP сервера.
+# Запуск: docker run -d --name caddy --restart unless-stopped --network host \
+#   -v $PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro -v caddy_data:/data -v caddy_config:/config caddy:2
+185-246-64-221.sslip.io {
+	encode gzip
+	reverse_proxy 127.0.0.1:8000
+}

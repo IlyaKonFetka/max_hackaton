@@ -1,5 +1,5 @@
 // Адрес бэкенда. Меняется без пересборки: файл отдаётся как есть.
 // Локальная разработка: http://localhost:8000. Продакшен: публичный HTTPS-адрес бэкенда.
 window.__APP_CONFIG__ = {
-  apiUrl: "https://nonceremonial-unvituperatively-nella.ngrok-free.dev",
+  apiUrl: "https://185-246-64-221.sslip.io",
 };
