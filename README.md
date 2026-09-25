@@ -11,6 +11,7 @@
 | API на сервере проверки | https://185-246-64-221.sslip.io, описание в `openapi.yaml`, интерактивно на `/docs` |
 | Проверки API | `DATA-API.yaml` (DATA-API 1.0, проходит валидатор организаторов) |
 | Тестовые данные | `testdata/profiles.json` |
+| Презентация | `presentation.pdf` |
 
 ## Зачем это нужно
 
@@ -58,7 +59,7 @@ compose.yaml, Dockerfile  один контейнер: бэкенд, бот и �
 ## Запуск одной командой
 
 ```bash
-cp .env.example .env        # вписать MAX_BOT_TOKEN
+cp .env.example .env        # MAX_BOT_TOKEN нужен только для локального бота
 docker compose up --build
 ```
 

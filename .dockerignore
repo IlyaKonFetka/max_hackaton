@@ -12,3 +12,4 @@ backend/static
 backend/tests
 *.md
 !README.md
+presentation.pdf
