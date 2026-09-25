@@ -28,13 +28,25 @@ HELP = (
 
 OWNER_ONLY = "Это действие доступно владельцу заведения."
 
+
+def plural(n: int, one: str, few: str, many: str) -> str:
+    if n % 10 == 1 and n % 100 != 11:
+        return one
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return few
+    return many
+
+
 def result_text(venue_name: str, summ: dict) -> str:
     lines = [f"Заведение: {venue_name}", ""]
-    lines.append(f"По вашему профилю применимо {summ['applicable']} требований из {summ['total']}:")
+    n = summ["applicable"]
+    lines.append(f"По вашему профилю применимо {n} {plural(n, 'требование', 'требования', 'требований')} из {summ['total']}:")
     for agency, n in summ["by_agency"].items():
         lines.append(f"• {agency} — {n}")
     if summ["by_period"]:
-        parts = [f"{PERIOD_LABELS[p]} — {n}" for p, n in sorted(summ["by_period"].items(), key=lambda x: x[0])]
+        # PERIOD_LABELS идёт от «разово» к «ежегодно»; разовые пункты ставим в конец, регулярные важнее
+        order = [p for p in PERIOD_LABELS if p != "once"] + ["once"]
+        parts = [f"{PERIOD_LABELS[p]} — {summ['by_period'][p]}" for p in order if summ["by_period"].get(p)]
         lines.append("")
         lines.append("Периодичность: " + ", ".join(parts))
     if summ["not_applicable"]:

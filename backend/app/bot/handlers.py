@@ -188,7 +188,7 @@ async def show_status(chat_id: int, user_id: int):
         lines = [f"{venue.name}" + (f", {venue.region}" if venue.region else "")]
         if open_s:
             p = svc.progress(open_s)
-            lines.append(f"Самопроверка в процессе: {p['answered']} из {p['total']} пунктов.")
+            lines.append(f"Самопроверка в процессе: отмечено {p['answered']} из {p['total']}.")
         elif last and last.finished_at:
             c = svc.session_report(last)["counts"]
             lines.append(

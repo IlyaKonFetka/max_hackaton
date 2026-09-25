@@ -7,6 +7,7 @@ import logging
 from maxapi.types import InputMedia
 
 from ..bot.client import bot
+from ..bot.texts import plural
 from ..config import settings
 from ..db import CheckSession, User, Venue, db_session
 from .pdf import build_act
@@ -54,7 +55,7 @@ async def send_act(session_id: int) -> bool:
     ]
     if tasks:
         lines.append("")
-        lines.append(f"План устранения — {len(tasks)} задач:")
+        lines.append(f"План устранения: {len(tasks)} {plural(len(tasks), 'задача', 'задачи', 'задач')}")
         for t in tasks[:10]:
             lines.append(f"• до {local_date(t.due_date, tz)} — {t.title}")
         if len(tasks) > 10:
@@ -63,7 +64,7 @@ async def send_act(session_id: int) -> bool:
         lines.append("Назначить ответственных и закрывать задачи — /tasks. Я напомню о сроках.")
     else:
         lines.append("")
-        lines.append("Нарушений нет — задач в плане устранения не создано.")
+        lines.append("Нарушений нет, план устранения не нужен.")
 
     ok = await send_text(owner, "\n".join(lines))
     try:

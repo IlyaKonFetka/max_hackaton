@@ -63,7 +63,8 @@ export default function App() {
 
   const finish = async (session: SessionPayload) => {
     if (session.progress.remaining > 0) {
-      const ok = window.confirm(`Не отмечено ${session.progress.remaining} пунктов. Они попадут в акт как «не проверено». Завершить?`)
+      const n = session.progress.remaining
+      const ok = window.confirm(`Не отмечено ${n} ${plural(n, 'пункт', 'пункта', 'пунктов')}. В акте они будут «не проверено». Завершить?`)
       if (!ok) return
     }
     setFinishing(true)
@@ -261,10 +262,10 @@ function Finished({ session, result, onNew, onTasks }: { session: SessionPayload
       </div>
       {result.tasks.length > 0 ? (
         <div className="card">
-          <p className="card-title">План устранения — {result.tasks.length} {plural(result.tasks.length, 'задача', 'задачи', 'задач')}</p>
+          <p className="card-title">План устранения: {result.tasks.length} {plural(result.tasks.length, 'задача', 'задачи', 'задач')}</p>
           <ul className="reasons">
             {result.tasks.map((t) => (
-              <li key={t.id}>до {new Date(t.due_date).toLocaleDateString('ru-RU')} — {t.title}</li>
+              <li key={t.id}>до {new Date(t.due_date).toLocaleDateString('ru-RU')}: {t.title}</li>
             ))}
           </ul>
           <p className="details" style={{ marginTop: 6 }}>Бот напомнит о сроках. Назначить ответственного можно в чате, команда /tasks.</p>
@@ -275,7 +276,7 @@ function Finished({ session, result, onNew, onTasks }: { session: SessionPayload
       <div className="bottom">
         <div className="bottom-inner">
           {result.tasks.length > 0 && <Button size="large" variant="secondary" onClick={onTasks}>Задачи</Button>}
-          <Button size="large" onClick={onNew}>Новая самопроверка</Button>
+          <Button size="large" onClick={onNew}>{result.tasks.length > 0 ? 'Новая проверка' : 'Новая самопроверка'}</Button>
         </div>
       </div>
     </div>
