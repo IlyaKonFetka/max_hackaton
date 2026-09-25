@@ -102,7 +102,7 @@ def test_shop_profile_uses_retail_rulebook(book):
     got = ids(shop, book)
     assert any(i.startswith("rt-shop-") for i in got)
     assert not any(i in got for i in ("rpn-temp-log", "rpn-health-journal", "rpn-flow", "rpn-haccp"))
-    assert {"rpn-notice", "alc-retail", "rt-contracts"} <= got
+    assert {"rpn-notice", "alc-shop", "rt-contracts"} <= got
 
 
 def test_funnel_counts_add_up(book):
