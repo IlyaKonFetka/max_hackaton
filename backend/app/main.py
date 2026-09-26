@@ -7,7 +7,7 @@ import logging
 import sys
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -25,6 +25,9 @@ if sys.platform == "win32":
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("app")
+
+# Фоновые задачи бота: по ним /health понимает, жив ли бот, а не только API.
+_bot_tasks: dict[str, asyncio.Task] = {}
 
 
 @asynccontextmanager
@@ -56,6 +59,7 @@ async def lifespan(app: FastAPI):
             log.warning("не удалось установить команды: %s", e)
         tasks.append(asyncio.create_task(dp.start_polling(bot), name="bot-polling"))
         tasks.append(asyncio.create_task(reminder_loop(), name="reminders"))
+        _bot_tasks.update({t.get_name(): t for t in tasks})
     elif not settings.bot_token:
         log.warning("MAX_BOT_TOKEN не задан — бот не запущен, работает только API")
     try:
@@ -82,9 +86,19 @@ app.include_router(router)
 
 
 @app.get("/health")
-def health():
+def health(response: Response):
+    """Жив ли сервис. Если бот должен работать, а его задача завершилась, отвечаем 503:
+    по этому коду Docker помечает контейнер нездоровым (autoheal перезапустит), а мониторинг пришлёт уведомление."""
     book = get_rulebook()
-    return {"status": "ok", "ok": True, "rules": len(book.rules), "rules_version": book.version}
+    if not _bot_tasks:
+        bot = "disabled"
+    else:
+        bot = "running" if all(not t.done() for t in _bot_tasks.values()) else "stopped"
+    ok = bot != "stopped"
+    if not ok:
+        response.status_code = 503
+    return {"status": "ok" if ok else "degraded", "ok": ok, "bot": bot, "rules": len(book.rules),
+            "rules_version": book.version}
 
 
 # Фото — по случайным именам, только чтение.

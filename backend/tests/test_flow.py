@@ -124,3 +124,19 @@ def test_upload_applies_exif_orientation(client):
     saved = Image.open(abs_path(rel))
     assert saved.size == (20, 40), "ориентация должна быть применена к пикселям"
     assert not saved.getexif().get(0x0112), "EXIF-ориентация должна быть сброшена"
+
+
+def test_health_reports_stopped_bot(client, monkeypatch):
+    """Если задача бота завершилась, /health отвечает 503: Docker перезапустит контейнер, мониторинг пришлёт уведомление."""
+    import asyncio
+
+    import app.main as main
+
+    assert client.get("/health").json()["bot"] == "disabled"  # в тестах бот не запускается
+    loop = asyncio.new_event_loop()
+    fut = loop.create_future()
+    fut.set_result(None)
+    monkeypatch.setattr(main, "_bot_tasks", {"bot-polling": fut})
+    r = client.get("/health")
+    assert r.status_code == 503 and r.json()["bot"] == "stopped" and r.json()["ok"] is False
+    loop.close()
