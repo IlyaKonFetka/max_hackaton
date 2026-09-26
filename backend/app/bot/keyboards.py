@@ -54,10 +54,13 @@ def question_kb(field: Field):
 def multi_kb(field: Field, selected: list):
     """Множественный выбор: отмеченные варианты с галочкой, внизу «Готово»."""
     kb = InlineKeyboardBuilder()
+    # «Готово» и сверху, и снизу: на интервью люди отмечали пункты и не находили кнопку под длинным списком
+    done = f"{field.done_label} — дальше" + (f" (отмечено: {len(selected)})" if selected else "")
+    kb.row(CallbackButton(text=done, payload=f"mdone|{field.key}"))
     for i, o in enumerate(field.options):
         mark = "✓ " if o.value in selected else ""
         kb.row(CallbackButton(text=f"{mark}{o.label}", payload=f"mul|{field.key}|{i}"))
-    kb.row(CallbackButton(text=field.done_label, payload=f"mdone|{field.key}"))
+    kb.row(CallbackButton(text=done, payload=f"mdone|{field.key}"))
     return kb.as_markup()
 
 

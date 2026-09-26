@@ -93,6 +93,10 @@ class Rule:
     section: str = ""
     domain: str = ""  # вид деятельности, для которого требование; нужен, когда условие отсекает по виду заведения
     refs: tuple[tuple[str, tuple[int, ...]], ...] = ()  # (id проверочного листа, номера вопросов)
+    # Объяснение для тех, к кому пункт не относится, если это важно показать (например, изменение СанПиН);
+    # показывается вместо «другого вида деятельности», когда выполнено explain_if
+    explain: str = ""
+    explain_if: dict | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -252,6 +256,8 @@ def _parse_rules(raw: dict) -> list[Rule]:
                 section=it.get("section", file_section),
                 domain=it.get("domain", file_domain),
                 refs=parse_refs(src.get("checklist", "")),
+                explain=it.get("explain", ""),
+                explain_if=it.get("explain_if"),
             )
         )
     return rules
@@ -315,6 +321,7 @@ def load_rulebook(rules_dir: str | Path) -> Rulebook:
 
     field_keys = {f.key for f in fields}
     preds = [(r.id, r.applies_if) for r in rules] + [(c.id, c.applies_if) for c in checklists]
+    preds += [(r.id, r.explain_if) for r in rules]
     preds += [(c.id, c.when_if) for c in checklists]
     preds += [(f.key, f.ask_if) for f in fields]
     for owner, pred in preds:

@@ -22,8 +22,8 @@
       },
       "expected": {
         "applicable": 46,
-        "not_applicable": 12,
-        "other_domain": 18,
+        "not_applicable": 15,
+        "other_domain": 15,
         "by_agency": {
           "Роспотребнадзор": 30,
           "Роструд": 13,
@@ -56,8 +56,8 @@
       },
       "expected": {
         "applicable": 19,
-        "not_applicable": 39,
-        "other_domain": 18,
+        "not_applicable": 42,
+        "other_domain": 15,
         "by_agency": {
           "Роспотребнадзор": 17,
           "МЧС России": 2
@@ -89,8 +89,8 @@
       },
       "expected": {
         "applicable": 45,
-        "not_applicable": 13,
-        "other_domain": 18,
+        "not_applicable": 16,
+        "other_domain": 15,
         "by_agency": {
           "Роспотребнадзор": 28,
           "Роструд": 13,

@@ -84,7 +84,8 @@ def test_other_domain_is_separated(book):
     """Требования для магазинов у кафе не попадают в обычное «не применимо», а считаются другой отраслью."""
     by_id = {v.rule.id: v for v in evaluate_all(CAFE, book)}
     assert by_id["rt-shop-docs"].other_domain == "Магазины"
-    assert by_id["rpn-brakerazh"].other_domain.startswith("Столовые")
+    # Бракераж не прячется: владельцу кафе важно узнать, что по новому СанПиН он не обязателен, и почему
+    assert by_id["rpn-brakerazh"].other_domain == "" and "п. 56, 64" in by_id["rpn-brakerazh"].reasons[0]
     assert by_id["rpn-delivery"].other_domain == ""  # доставку кафе может начать — это обычное «не применимо»
 
 

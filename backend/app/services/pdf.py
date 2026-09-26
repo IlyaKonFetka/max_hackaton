@@ -62,6 +62,9 @@ def build_act(session: CheckSession, venue: Venue, owner_name: str) -> Path:
 
     story.append(Paragraph("Акт самопроверки соблюдения обязательных требований", h1))
     story.append(Paragraph(
+        "Самопроверка, проведённая владельцем. Не является документом контрольного органа и не подтверждает "
+        "соблюдение требований перед инспектором.", small))
+    story.append(Paragraph(
         f"Объект: <b>{_esc(venue.name)}</b>" + (f", {_esc(venue.region)}" if venue.region else "")
         + (f" · координаты {venue.lat:.5f}, {venue.lon:.5f}" if venue.lat is not None and venue.lon is not None else ""),
         base))

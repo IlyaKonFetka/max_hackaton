@@ -121,6 +121,8 @@ def evaluate(rule: Rule, profile: dict, book: Rulebook) -> Verdict:
     if ok:
         return Verdict(rule, True, ())
     uniq = tuple(dict.fromkeys(r for r, _ in reasons))
+    if rule.explain and check(rule.explain_if, profile, book)[0]:
+        return Verdict(rule, False, (rule.explain,), "")
     other = any(key == ACTIVITY_FIELD for _, key in reasons)
     return Verdict(rule, False, uniq, (rule.domain or "Другой вид деятельности") if other else "")
 
