@@ -101,7 +101,7 @@ export function RuleCard({ rule, disabled, canAsk, onStatus, onComment, onPhoto 
             aria-expanded={asking}
             aria-label="Спросить помощника про этот пункт"
           >
-            <span aria-hidden>🤖</span> Спросить
+            <BotIcon /> Спросить
           </button>
         )}
       </div>
@@ -146,7 +146,7 @@ export function RuleCard({ rule, disabled, canAsk, onStatus, onComment, onPhoto 
           {rule.photo_url && <img src={rule.photo_url} alt="" />}
           {!disabled && (
             <button type="button" className="photo-btn" onClick={pick} disabled={busy}>
-              📷 {rule.photo_url ? 'Заменить фото' : rule.status === 'violation' ? 'Фото «как есть»' : 'Добавить фото'}
+              {rule.photo_url ? 'Заменить фото' : rule.status === 'violation' ? 'Фото «как есть»' : 'Добавить фото'}
             </button>
           )}
           <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onFile} />
@@ -189,10 +189,7 @@ function AskBox({ ruleId }: { ruleId: string }) {
       {chat.map((m, i) => (
         <div key={i} className="ask-msg">
           <p className="ask-q">{m.q}</p>
-          <p className="ask-a">
-            <span aria-hidden>🤖 </span>
-            {m.a}
-          </p>
+          <p className="ask-a">{m.a}</p>
           {i === chat.length - 1 && <p className="muted">{m.note}</p>}
         </div>
       ))}
@@ -225,6 +222,19 @@ function AskBox({ ruleId }: { ruleId: string }) {
       </div>
       {err && <p className="err">{err}</p>}
     </div>
+  )
+}
+
+/** Робот тонкой линией: знак помощника вместо эмодзи. */
+function BotIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <path d="M12 3.5v3" />
+      <rect x="4.5" y="6.5" width="15" height="12" rx="3.5" />
+      <path d="M2.5 11v3M21.5 11v3" />
+      <circle cx="9.5" cy="12.5" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="14.5" cy="12.5" r="1.1" fill="currentColor" stroke="none" />
+    </svg>
   )
 }
 

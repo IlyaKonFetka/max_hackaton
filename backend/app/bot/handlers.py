@@ -264,7 +264,7 @@ async def show_tasks(chat_id: int, user_id: int):
         for t in tasks[:15]:
             overdue = t.due_date < utcnow()
             who = "" if staff else (f"\nОтветственный: {t.assignee_name}" if t.assignee_name else "")
-            text = f"{'⚠ Просрочено' if overdue else 'До'} {_fmt_date(t.due_date)}\n{t.title}{who}"
+            text = f"{'Просрочено, срок' if overdue else 'До'} {_fmt_date(t.due_date)}\n{t.title}{who}"
             markup = kb.staff_task_kb(t.id) if staff else kb.task_kb(t.id, bool(t.assignee_name))
             await _send(chat_id, text, attachments=[markup])
 
@@ -445,7 +445,7 @@ async def _join_with_contact(chat_id: int, user_id: int, mid: int, attachment):
 # пока предыдущее обновление сообщения в полёте, поэтому тумблеры в одной клавиатуре ненадёжны.
 # Фото, присланное во время вопроса, привязывается именно к этому пункту.
 
-SHIFT_ANSWER_LABEL = {"ok": "✅ выполнено", "no": "❌ не выполнено", "skip": "пропущено"}
+SHIFT_ANSWER_LABEL = {"ok": "выполнено", "no": "не выполнено", "skip": "пропущено"}
 
 
 def _shift_rules(venue: Venue):

@@ -70,10 +70,10 @@ export function Tasks() {
             <div className="photo-row" style={{ marginTop: 10 }}>
               {t.photo_before_url && <img src={t.photo_before_url} alt="как есть" />}
               <Button size="small" variant="secondary" disabled={busyId === t.id} onClick={() => withPhoto(t)}>
-                📷 Выполнено
+                Выполнено с фото
               </Button>
               <Button size="small" variant="ghost" disabled={busyId === t.id} onClick={() => done(t)}>
-                Выполнено без фото
+                Без фото
               </Button>
             </div>
           </div>

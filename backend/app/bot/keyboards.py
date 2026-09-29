@@ -119,7 +119,7 @@ def task_kb(task_id: int, assigned: bool):
 def staff_task_kb(task_id: int):
     """Клавиатура сотрудника: только закрыть, фото — основной путь."""
     kb = InlineKeyboardBuilder()
-    kb.row(CallbackButton(text="📷 Выполнено — приложить фото", payload=f"done|{task_id}"))
+    kb.row(CallbackButton(text="Выполнено — приложить фото", payload=f"done|{task_id}"))
     kb.row(CallbackButton(text="Выполнено без фото", payload=f"done_nophoto|{task_id}"))
     return kb.as_markup()
 
@@ -170,8 +170,8 @@ def shift_item_kb(check_id: int, rule_id: str):
     """Один пункт чек-листа смены за раз: короткие кнопки, полный текст пункта — в теле сообщения."""
     kb = InlineKeyboardBuilder()
     kb.row(
-        CallbackButton(text="✅ Выполнено", payload=f"shq|{check_id}|{rule_id}|ok"),
-        CallbackButton(text="❌ Нет", payload=f"shq|{check_id}|{rule_id}|no"),
+        CallbackButton(text="Выполнено", payload=f"shq|{check_id}|{rule_id}|ok"),
+        CallbackButton(text="Не выполнено", payload=f"shq|{check_id}|{rule_id}|no"),
     )
     kb.row(
         CallbackButton(text="Пропустить", payload=f"shq|{check_id}|{rule_id}|skip"),
