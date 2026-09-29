@@ -12,4 +12,3 @@ backend/static
 backend/tests
 *.md
 !README.md
-t419_*.pdf
