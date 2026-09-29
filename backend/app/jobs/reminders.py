@@ -41,7 +41,7 @@ async def _remind_tasks() -> None:
                 t.last_reminded_at = now
                 for u in recipients:
                     if u:
-                        to_send.append((u, f"Просрочена задача (срок {due_local}):\n{t.title}\n\nЗакрыть: /tasks"))
+                        to_send.append((u, f"⚠ Просрочена задача (срок {due_local}):\n{t.title}\n\nЗакрыть: /tasks"))
             elif 0 <= hours_left <= 30 and not already:
                 t.last_reminded_at = now
                 for u in recipients:

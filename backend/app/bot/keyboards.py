@@ -170,8 +170,8 @@ def shift_item_kb(check_id: int, rule_id: str):
     """Один пункт чек-листа смены за раз: короткие кнопки, полный текст пункта — в теле сообщения."""
     kb = InlineKeyboardBuilder()
     kb.row(
-        CallbackButton(text="Выполнено", payload=f"shq|{check_id}|{rule_id}|ok"),
-        CallbackButton(text="Не выполнено", payload=f"shq|{check_id}|{rule_id}|no"),
+        CallbackButton(text="✅ Выполнено", payload=f"shq|{check_id}|{rule_id}|ok"),
+        CallbackButton(text="❌ Нет", payload=f"shq|{check_id}|{rule_id}|no"),
     )
     kb.row(
         CallbackButton(text="Пропустить", payload=f"shq|{check_id}|{rule_id}|skip"),

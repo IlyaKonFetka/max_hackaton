@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { api, type ApplicableRule, type Status } from '../api'
 import { haptic } from '../bridge'
+import { BotIcon, CameraIcon, PlaneIcon } from './icons'
 
 interface Props {
   rule: ApplicableRule
@@ -146,6 +147,7 @@ export function RuleCard({ rule, disabled, canAsk, onStatus, onComment, onPhoto 
           {rule.photo_url && <img src={rule.photo_url} alt="" />}
           {!disabled && (
             <button type="button" className="photo-btn" onClick={pick} disabled={busy}>
+              <CameraIcon />
               {rule.photo_url ? 'Заменить фото' : rule.status === 'violation' ? 'Фото «как есть»' : 'Добавить фото'}
             </button>
           )}
@@ -222,26 +224,5 @@ function AskBox({ ruleId }: { ruleId: string }) {
       </div>
       {err && <p className="err">{err}</p>}
     </div>
-  )
-}
-
-/** Робот тонкой линией: знак помощника вместо эмодзи. */
-function BotIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-      <path d="M12 3.5v3" />
-      <rect x="4.5" y="6.5" width="15" height="12" rx="3.5" />
-      <path d="M2.5 11v3M21.5 11v3" />
-      <circle cx="9.5" cy="12.5" r="1.1" fill="currentColor" stroke="none" />
-      <circle cx="14.5" cy="12.5" r="1.1" fill="currentColor" stroke="none" />
-    </svg>
-  )
-}
-
-function PlaneIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden>
-      <path fill="currentColor" d="M3.4 20.4 21.9 12 3.4 3.6 3.4 10.1 16.6 12 3.4 13.9z" />
-    </svg>
   )
 }
