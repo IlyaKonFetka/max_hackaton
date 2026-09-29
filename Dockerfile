@@ -16,6 +16,9 @@ RUN pip install --no-cache-dir -r backend/requirements.txt
 COPY backend/ backend/
 COPY rules/ rules/
 COPY --from=miniapp /src/dist backend/static
+# Коммит, из которого собран образ: /health его показывает, чтобы сверить сервер с хешем на служебном слайде
+ARG GIT_COMMIT=unknown
+ENV GIT_COMMIT=$GIT_COMMIT
 ENV DATA_DIR=/data RULES_DIR=/srv/rules STATIC_DIR=/srv/backend/static PORT=8000
 VOLUME ["/data"]
 EXPOSE 8000

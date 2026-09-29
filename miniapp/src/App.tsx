@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, Spinner } from '@maxhub/max-ui'
 import { api, ApiError, type ApplicableRule, type FinishResult, type SessionPayload, type Status } from './api'
-import { haptic, insideMax, startParam, webApp } from './bridge'
+import { closingConfirmation, haptic, insideMax, startParam } from './bridge'
 import { RuleCard } from './components/RuleCard'
 import { NotApplicable } from './components/NotApplicable'
 import { Tasks } from './components/Tasks'
@@ -72,7 +72,7 @@ export default function App() {
       const result = await api.finish(session.id)
       haptic('success')
       setScreen({ kind: 'finished', session: { ...session, finished_at: new Date().toISOString() }, result })
-      webApp()?.disableClosingConfirmation?.()
+      closingConfirmation(false)
     } catch (e) {
       showToast((e as Error).message)
       haptic('error')
@@ -187,10 +187,7 @@ function CheckScreen({ session, readOnly, tab, setTab, finishing, onFinish, onNe
 
   useEffect(() => {
     // Случайно смахнуть окно на середине списка обидно: при неотмеченных пунктах MAX переспросит.
-    const wa = webApp()
-    if (!wa) return
-    if (!readOnly && p.answered > 0 && p.remaining > 0) wa.enableClosingConfirmation?.()
-    else wa.disableClosingConfirmation?.()
+    closingConfirmation(!readOnly && p.answered > 0 && p.remaining > 0)
   }, [p.answered, p.remaining, readOnly])
 
   return (
@@ -204,10 +201,10 @@ function CheckScreen({ session, readOnly, tab, setTab, finishing, onFinish, onNe
         <div className="progress"><i style={{ width: `${pct}%` }} /></div>
         <div className="tabs">
           <button className={`tab ${tab === 'check' ? 'active' : ''}`} onClick={() => setTab('check')}>
-            Применимо <span className="n">{session.applicable.length}</span>
+            Проверить <span className="n">{session.applicable.length}</span>
           </button>
           <button className={`tab ${tab === 'na' ? 'active' : ''}`} onClick={() => setTab('na')}>
-            Не применимо <span className="n">{naCount}</span>
+            Не нужно <span className="n">{naCount}</span>
           </button>
           <button className={`tab ${tab === 'tasks' ? 'active' : ''}`} onClick={() => setTab('tasks')}>
             Задачи
@@ -252,7 +249,7 @@ function CheckScreen({ session, readOnly, tab, setTab, finishing, onFinish, onNe
               <Button size="large" stretched onClick={onNew}>Новая самопроверка</Button>
             ) : (
               <Button size="large" stretched loading={finishing} disabled={p.answered === 0 || finishing} onClick={onFinish}>
-                {p.remaining === 0 ? 'Завершить и сформировать акт' : `Завершить (${p.remaining} не отмечено)`}
+                {p.remaining === 0 ? 'Завершить и получить акт' : `Завершить (${p.remaining} не отмечено)`}
               </Button>
             )}
           </div>
@@ -279,7 +276,7 @@ function Finished({ session, result, onNew, onTasks }: { session: SessionPayload
       <div className="card" style={{ marginTop: 12 }}>
         <p className="card-title">{result.act_sent_to_chat ? 'Акт отправлен в чат с ботом' : 'Акт сформирован'}</p>
         <p className="details" style={{ marginTop: 4 }}>
-          В PDF профиль объекта, требования с реквизитами НПА, статусы и фото. Его можно переслать бухгалтеру или показать инспектору на профилактическом визите.
+          PDF со всеми пунктами, основаниями и фото. Это самопроверка для вас, не документ для инспектора.
         </p>
       </div>
       {result.tasks.length > 0 ? (
@@ -290,7 +287,7 @@ function Finished({ session, result, onNew, onTasks }: { session: SessionPayload
               <li key={t.id}>до {new Date(t.due_date).toLocaleDateString('ru-RU')}: {t.title}</li>
             ))}
           </ul>
-          <p className="details" style={{ marginTop: 6 }}>Бот напомнит о сроках. Назначить ответственного можно в чате, команда /tasks.</p>
+          <p className="details" style={{ marginTop: 6 }}>Бот напомнит о сроках. Ответственного назначают в чате: /tasks.</p>
         </div>
       ) : (
         <div className="card"><p className="card-title">Нарушений нет, план устранения не нужен.</p></div>

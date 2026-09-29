@@ -55,7 +55,7 @@ export function Tasks() {
   return (
     <>
       <p className="subtitle" style={{ margin: '10px 4px 0' }}>
-        Каждое нарушение превращается в задачу, срок берётся из справочника. Ответственного назначают в боте, команда /tasks.
+        Нарушения стали задачами со сроками. Ответственного назначают в чате: /tasks.
       </p>
       <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onFile} />
       {tasks.map((t) => {
@@ -70,10 +70,10 @@ export function Tasks() {
             <div className="photo-row" style={{ marginTop: 10 }}>
               {t.photo_before_url && <img src={t.photo_before_url} alt="как есть" />}
               <Button size="small" variant="secondary" disabled={busyId === t.id} onClick={() => withPhoto(t)}>
-                Выполнено, с фото
+                📷 Выполнено
               </Button>
               <Button size="small" variant="ghost" disabled={busyId === t.id} onClick={() => done(t)}>
-                Без фото
+                Выполнено без фото
               </Button>
             </div>
           </div>

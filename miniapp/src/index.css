@@ -23,6 +23,7 @@
 html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); }
 body { font: 15px/1.4 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; padding-bottom: env(safe-area-inset-bottom); }
 #root { min-height: 100vh; }
+#root > div { min-height: 100vh; background: var(--bg); } /* обёртка MaxUI по умолчанию белая */
 
 .page { padding: 12px 12px calc(84px + env(safe-area-inset-bottom)); max-width: 720px; margin: 0 auto; }
 .topbar { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 8px 0 6px; }
@@ -60,9 +61,8 @@ body { font: 15px/1.4 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; 
 .details p { margin: 4px 0; }
 .linkbtn { border: 0; background: none; color: var(--accent); font-size: 13px; padding: 4px 0; font-weight: 600; }
 
-.viol-extra { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
-.viol-extra textarea { width: 100%; min-height: 56px; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font: inherit; background: transparent; color: var(--text); resize: vertical; }
-.photo-row { display: flex; gap: 10px; align-items: center; }
+.comment { display: block; width: 100%; min-height: 48px; margin-top: 10px; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font: inherit; font-size: 14px; background: transparent; color: var(--text); resize: vertical; }
+.photo-row { display: flex; gap: 10px; align-items: center; margin-top: 10px; }
 .photo-row img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; }
 .photo-btn { border: 1px dashed var(--line); background: transparent; color: var(--text); padding: 10px 12px; border-radius: 10px; font-size: 13px; }
 input[type=file] { display: none; }
@@ -103,7 +103,24 @@ input[type=file] { display: none; }
 .lists .badge { margin-right: 6px; }
 .badge.maybe { background: transparent; border: 1px solid var(--accent); }
 
-/* Вопрос помощнику внутри пункта */
-.ask { margin-top: 10px; }
-.ask textarea { width: 100%; min-height: 54px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 10px; padding: 8px; font: inherit; font-size: 14px; background: transparent; color: var(--text); }
-.ask .answer { margin: 8px 0 0; color: var(--text); white-space: pre-wrap; }
+
+/* Строка под кнопками статуса: «Подробнее» слева, помощник справа */
+.card-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+.askbtn { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--accent); background: transparent; color: var(--accent); border-radius: 999px; padding: 4px 11px; font-size: 13px; font-weight: 600; }
+.askbtn.on { background: var(--accent); color: #fff; }
+
+/* Помощник: короткая переписка под пунктом */
+.ask { margin-top: 8px; padding: 10px; border-radius: 12px; background: var(--accent-bg); display: flex; flex-direction: column; gap: 8px; }
+.ask-msg { display: flex; flex-direction: column; gap: 6px; }
+.ask-q { align-self: flex-end; max-width: 85%; margin: 0; padding: 7px 10px; border-radius: 12px 12px 4px 12px; background: var(--accent); color: #fff; font-size: 14px; }
+.ask-a { align-self: flex-start; max-width: 95%; margin: 0; padding: 8px 10px; border-radius: 12px 12px 12px 4px; background: var(--card); color: var(--text); font-size: 14px; white-space: pre-wrap; }
+.ask-msg .muted { margin: 0; }
+.ask-quick { display: flex; gap: 6px; flex-wrap: wrap; }
+.ask-quick button { border: 1px solid var(--accent); background: var(--card); color: var(--accent); border-radius: 999px; padding: 5px 10px; font-size: 13px; }
+.ask-input { display: flex; gap: 6px; align-items: flex-end; }
+.ask-input textarea { flex: 1; min-height: 38px; max-height: 120px; border: 1px solid var(--line); border-radius: 19px; padding: 9px 14px; font: inherit; font-size: 14px; background: var(--card); color: var(--text); resize: none; }
+.sendbtn { flex: none; width: 38px; height: 38px; border: 0; border-radius: 50%; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; }
+.sendbtn:disabled { opacity: .45; }
+.reason { margin: 14px 4px 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.reason.long { font-weight: 400; line-height: 1.4; }
+.ask-input textarea:focus { outline: none; border-color: var(--accent); }

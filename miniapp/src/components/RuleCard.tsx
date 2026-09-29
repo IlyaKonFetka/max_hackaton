@@ -12,10 +12,10 @@ interface Props {
 }
 
 const STATUS_LABEL: Record<Status, string> = { ok: 'Соблюдается', violation: 'Нарушение', unknown: 'Не знаю' }
-const SEVERITY: Record<string, string> = { high: 'важное', medium: 'среднее', low: 'низкое' }
 
 export function RuleCard({ rule, disabled, canAsk, onStatus, onComment, onPhoto }: Props) {
   const [open, setOpen] = useState(false)
+  const [asking, setAsking] = useState(false)
   const [busy, setBusy] = useState(false)
   const [comment, setComment] = useState(rule.comment ?? '')
   const [err, setErr] = useState<string | null>(null)
@@ -64,12 +64,13 @@ export function RuleCard({ rule, disabled, canAsk, onStatus, onComment, onPhoto 
   }
 
   const src = rule.source
+  const needsPhoto = rule.status === 'violation' || (rule.status === 'ok' && rule.evidence === 'photo')
   return (
     <div className={`card ${rule.status ?? ''}`}>
       <p className="card-title">{rule.title}</p>
       <div className="meta">
         <span className="badge">{rule.period_label}</span>
-        {rule.severity === 'high' && <span className="badge sev-high">{SEVERITY[rule.severity]}</span>}
+        {rule.severity === 'high' && <span className="badge sev-high">важное</span>}
         {rule.evidence === 'photo' && <span>нужно фото</span>}
         {rule.evidence === 'document' && <span>нужен документ</span>}
       </div>
@@ -88,9 +89,23 @@ export function RuleCard({ rule, disabled, canAsk, onStatus, onComment, onPhoto 
         ))}
       </div>
 
-      <button type="button" className="linkbtn" onClick={() => setOpen((v) => !v)}>
-        {open ? 'Скрыть основание' : 'Что проверить и основание'}
-      </button>
+      <div className="card-actions">
+        <button type="button" className="linkbtn" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+          {open ? 'Свернуть' : 'Подробнее'}
+        </button>
+        {canAsk && (
+          <button
+            type="button"
+            className={`askbtn ${asking ? 'on' : ''}`}
+            onClick={() => setAsking((v) => !v)}
+            aria-expanded={asking}
+            aria-label="Спросить помощника про этот пункт"
+          >
+            <span aria-hidden>🤖</span> Спросить
+          </button>
+        )}
+      </div>
+
       {open && (
         <div className="details">
           {rule.check && (
@@ -111,39 +126,30 @@ export function RuleCard({ rule, disabled, canAsk, onStatus, onComment, onPhoto 
             Актуально на {src.as_of}
             {!src.verified && ' · реквизиты требуют сверки с текстом НПА'}
           </p>
-          {canAsk && <AskBox ruleId={rule.id} />}
         </div>
       )}
 
+      {canAsk && asking && <AskBox ruleId={rule.id} />}
+
       {rule.status === 'violation' && (
-        <div className="viol-extra">
-          <textarea
-            placeholder="Комментарий: что именно не так"
-            value={comment}
-            disabled={disabled}
-            onChange={(e) => setComment(e.target.value)}
-            onBlur={saveComment}
-          />
-          <div className="photo-row">
-            {rule.photo_url && <img src={rule.photo_url} alt="" />}
-            {!disabled && (
-              <button type="button" className="photo-btn" onClick={pick} disabled={busy}>
-                {rule.photo_url ? 'Заменить фото' : 'Сфотографировать «как есть»'}
-              </button>
-            )}
-            <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onFile} />
-          </div>
-        </div>
+        <textarea
+          className="comment"
+          placeholder="Что не так? Можно не заполнять"
+          value={comment}
+          disabled={disabled}
+          onChange={(e) => setComment(e.target.value)}
+          onBlur={saveComment}
+        />
       )}
-      {rule.status === 'ok' && rule.evidence === 'photo' && !disabled && (
-        <div className="viol-extra">
-          <div className="photo-row">
-            {rule.photo_url && <img src={rule.photo_url} alt="" />}
+      {needsPhoto && (rule.photo_url || !disabled) && (
+        <div className="photo-row">
+          {rule.photo_url && <img src={rule.photo_url} alt="" />}
+          {!disabled && (
             <button type="button" className="photo-btn" onClick={pick} disabled={busy}>
-              {rule.photo_url ? 'Заменить фото' : 'Приложить фото-подтверждение'}
+              📷 {rule.photo_url ? 'Заменить фото' : rule.status === 'violation' ? 'Фото «как есть»' : 'Добавить фото'}
             </button>
-            <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onFile} />
-          </div>
+          )}
+          <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onFile} />
         </div>
       )}
       {err && <div className="err">{err}</div>}
@@ -151,38 +157,81 @@ export function RuleCard({ rule, disabled, canAsk, onStatus, onComment, onPhoto 
   )
 }
 
+const QUICK = ['Как это выполнить?', 'Какие документы нужны?']
+
 /** Вопрос помощнику про этот пункт. Отвечает по справочнику заведения, применимость не меняет. */
 function AskBox({ ruleId }: { ruleId: string }) {
   const [q, setQ] = useState('')
   const [busy, setBusy] = useState(false)
-  const [answer, setAnswer] = useState<{ text: string; note: string } | null>(null)
+  const [chat, setChat] = useState<{ q: string; a: string; note: string }[]>([])
   const [err, setErr] = useState<string | null>(null)
-  const send = async () => {
-    if (q.trim().length < 2 || busy) return
+
+  const send = async (text: string) => {
+    const question = text.trim()
+    if (question.length < 2 || busy) return
     setBusy(true)
     setErr(null)
     try {
-      const r = await api.ask(q.trim(), ruleId)
-      setAnswer({ text: r.answer, note: r.disclaimer })
+      const r = await api.ask(question, ruleId)
+      setChat((c) => [...c, { q: question, a: r.answer, note: r.disclaimer }])
+      setQ('')
+      haptic('success')
     } catch (e) {
       setErr((e as Error).message)
+      haptic('error')
     } finally {
       setBusy(false)
     }
   }
+
   return (
     <div className="ask">
-      <textarea placeholder="Спросить про этот пункт своими словами" value={q} onChange={(e) => setQ(e.target.value)} />
-      <button type="button" className="linkbtn" onClick={send} disabled={busy}>
-        {busy ? 'Помощник думает…' : 'Спросить помощника'}
-      </button>
-      {err && <p className="err">{err}</p>}
-      {answer && (
-        <p className="answer">
-          {answer.text}
-          <span className="muted"> {answer.note}</span>
-        </p>
+      {chat.map((m, i) => (
+        <div key={i} className="ask-msg">
+          <p className="ask-q">{m.q}</p>
+          <p className="ask-a">
+            <span aria-hidden>🤖 </span>
+            {m.a}
+          </p>
+          {i === chat.length - 1 && <p className="muted">{m.note}</p>}
+        </div>
+      ))}
+      {chat.length === 0 && (
+        <div className="ask-quick">
+          {QUICK.map((t) => (
+            <button key={t} type="button" disabled={busy} onClick={() => send(t)}>
+              {t}
+            </button>
+          ))}
+        </div>
       )}
+      <div className="ask-input">
+        <textarea
+          rows={1}
+          placeholder={busy ? 'Помощник отвечает…' : 'Ваш вопрос про этот пункт'}
+          value={q}
+          disabled={busy}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              void send(q)
+            }
+          }}
+        />
+        <button type="button" className="sendbtn" disabled={busy || q.trim().length < 2} onClick={() => send(q)} aria-label="Отправить">
+          {busy ? <span className="dots" aria-hidden>…</span> : <PlaneIcon />}
+        </button>
+      </div>
+      {err && <p className="err">{err}</p>}
     </div>
+  )
+}
+
+function PlaneIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden>
+      <path fill="currentColor" d="M3.4 20.4 21.9 12 3.4 3.6 3.4 10.1 16.6 12 3.4 13.9z" />
+    </svg>
   )
 }

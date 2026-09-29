@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 from contextlib import asynccontextmanager
 
@@ -98,7 +99,7 @@ def health(response: Response):
     if not ok:
         response.status_code = 503
     return {"status": "ok" if ok else "degraded", "ok": ok, "bot": bot, "rules": len(book.rules),
-            "rules_version": book.version}
+            "rules_version": book.version, "commit": os.environ.get("GIT_COMMIT", "unknown")}
 
 
 # Фото — по случайным именам, только чтение.

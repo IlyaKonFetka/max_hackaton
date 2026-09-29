@@ -1,6 +1,10 @@
 services:
   app:
-    build: .
+    build:
+      context: .
+      args:
+        # GIT_COMMIT=$(git rev-parse HEAD) docker compose up -d --build — тогда /health покажет коммит
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     image: applicability-engine:local
     env_file: .env
     environment:

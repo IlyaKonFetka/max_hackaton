@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from ..engine import PERIOD_LABELS
 
 APP_NAME = "Движок применимости"
 
@@ -44,40 +43,29 @@ def funnel_lines(f: dict) -> list[str]:
     lines = []
     if f.get("checklists_total"):
         yes, maybe = f["checklists_yes"], f["checklists_maybe"]
-        line = (f"Из {f['checklists_total']} проверочных листов Роспотребнадзора, Роструда и МЧС к вам "
-                f"{plural(yes, 'относится', 'относятся', 'относятся')} {yes} {plural(yes, 'лист', 'листа', 'листов')}")
-        line += f", ещё {maybe} — при условиях, которых нет в профиле." if maybe else "."
+        line = f"Из {f['checklists_total']} проверочных листов к вам {plural(yes, 'относится', 'относятся', 'относятся')} {yes}"
+        line += f" (ещё {maybe} — при условиях)." if maybe else "."
         lines.append(line)
     for d in f.get("detailed", []):
-        parts = [f"{d['not_applicable']} не относятся по профилю"] if d["not_applicable"] else []
-        if d["other_domain"]:
-            parts.append(f"{d['other_domain']} — другие виды деятельности: {', '.join(s.lower() for s in d['other_scopes'])}")
-        tail = f" ({'; '.join(parts)})" if parts else ""
-        lines.append(f"Лист Роспотребнадзора для общепита: к вам относятся {d['applicable']} вопросов из {d['questions']}{tail}.")
+        lines.append(f"Лист Роспотребнадзора для общепита: ваши {d['applicable']} вопросов из {d['questions']}.")
     return lines
 
 
 def result_text(venue_name: str, summ: dict) -> str:
-    lines = [f"Заведение: {venue_name}", ""]
+    lines = [venue_name, ""]
     fl = funnel_lines(summ.get("funnel") or {})
     if fl:
         lines.extend(fl)
         lines.append("")
     n = summ["applicable"]
     lines.append(f"В самопроверке {n} {plural(n, 'пункт', 'пункта', 'пунктов')}:")
-    for agency, n in summ["by_agency"].items():
-        lines.append(f"• {agency} — {n}")
-    if summ["by_period"]:
-        # PERIOD_LABELS идёт от «разово» к «ежегодно»; разовые пункты ставим в конец, регулярные важнее
-        order = [p for p in PERIOD_LABELS if p != "once"] + ["once"]
-        parts = [f"{PERIOD_LABELS[p]} — {summ['by_period'][p]}" for p in order if summ["by_period"].get(p)]
-        lines.append("")
-        lines.append("Периодичность: " + ", ".join(parts))
+    for agency, k in summ["by_agency"].items():
+        lines.append(f"• {agency} — {k}")
     if summ["not_applicable"]:
         lines.append("")
-        lines.append(f"Не применимо по профилю: {summ['not_applicable']}. Причины покажу по кнопке ниже.")
+        lines.append(f"Не относится к вам: {summ['not_applicable']}, причины — по кнопке ниже.")
     lines.append("")
-    lines.append("Дальше откройте самопроверку и отметьте каждый пункт: соблюдается, нарушение или не знаю.")
+    lines.append("Откройте самопроверку и отметьте пункты.")
     return "\n".join(lines)
 
 

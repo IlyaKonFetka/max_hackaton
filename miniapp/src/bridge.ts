@@ -36,12 +36,26 @@ export const startParam = (): string => {
 
 export const insideMax = (): boolean => Boolean(webApp()?.initData)
 
+/** Мост отвечает промисом; без транспорта (обычный браузер) он отклоняется — это не ошибка приложения. */
+const quiet = (r: unknown) => {
+  ;(r as Promise<unknown> | undefined)?.catch?.(() => {})
+}
+
+export const closingConfirmation = (on: boolean) => {
+  const wa = webApp()
+  try {
+    quiet(on ? wa?.enableClosingConfirmation?.() : wa?.disableClosingConfirmation?.())
+  } catch {
+    /* вне MAX */
+  }
+}
+
 export const haptic = (type: 'success' | 'warning' | 'error' | 'select' | 'tap') => {
   const h = webApp()?.HapticFeedback
   try {
-    if (type === 'select') h?.selectionChanged?.()
-    else if (type === 'tap') h?.impactOccurred?.('light')
-    else h?.notificationOccurred?.(type)
+    const r: unknown =
+      type === 'select' ? h?.selectionChanged?.() : type === 'tap' ? h?.impactOccurred?.('light') : h?.notificationOccurred?.(type)
+    quiet(r)
   } catch {
     /* вне MAX */
   }
